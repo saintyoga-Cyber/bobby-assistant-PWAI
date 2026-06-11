@@ -36,6 +36,9 @@ const PoiSearchCredits = 1_400_000
 const RouteCalculationCredits = 400_000
 const GPlacesLookupProCredits = 680_000
 const MapImageCredits = 80_000
+
+// Perplexity sonar: ~$5/1k searches plus small token costs ≈ $0.005/search.
+const WebSearchCredits = 200_000
 const MonthlyQuotaCredits = 80_000_000
 
 // monthlyQuotaCredits returns the effective monthly budget. Self-hosted

@@ -36,6 +36,9 @@ type Config struct {
 	// setting, not a code change.
 	ChatModel              string
 	VerifierModel          string
+	// PerplexityKey enables the web_search function. If unset, the function
+	// is not registered and the model never sees it.
+	PerplexityKey          string
 	MapboxKey              string
 	IBMKey                 string
 	ExchangeRateApiKey     string
@@ -85,6 +88,7 @@ func init() {
 		AnthropicKey:           os.Getenv("ANTHROPIC_API_KEY"),
 		ChatModel:              envOr("CHAT_MODEL", "claude-haiku-4-5"),
 		VerifierModel:          envOr("VERIFIER_MODEL", "claude-haiku-4-5"),
+		PerplexityKey:          os.Getenv("PERPLEXITY_API_KEY"),
 		MapboxKey:              os.Getenv("MAPBOX_KEY"),
 		IBMKey:                 os.Getenv("IBM_KEY"),
 		ExchangeRateApiKey:     os.Getenv("EXCHANGE_RATE_API_KEY"),
