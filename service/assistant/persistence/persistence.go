@@ -84,6 +84,8 @@ func StoreThread(ctx context.Context, r *redis.Client, thread *ThreadContext) er
 		span.AddField("error", err)
 		return err
 	}
-	r.Set(ctx, "thread:"+thread.ThreadId.String(), j, 10*time.Minute)
+	// 24h (was 10m): conversations should survive a workday, distinct from
+	// permanent memories (see the memory package), which never expire.
+	r.Set(ctx, "thread:"+thread.ThreadId.String(), j, 24*time.Hour)
 	return nil
 }

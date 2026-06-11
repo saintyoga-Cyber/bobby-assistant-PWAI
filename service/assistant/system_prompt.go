@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pebble-dev/bobby-assistant/service/assistant/memory"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/query"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/util"
 )
@@ -110,6 +111,27 @@ func generateWidgetSentence(ctx context.Context) string {
 	return sentence
 }
 
+func (ps *PromptSession) generateMemorySentence(ctx context.Context) string {
+	if ps.userId == 0 {
+		return ""
+	}
+	entries, err := memory.GetAll(ctx, ps.redis, ps.userId)
+	if err != nil {
+		log.Printf("Failed to load memories: %v", err)
+		return ""
+	}
+	sentence := "\nYou have a long-term memory. Use the 'remember' function to store durable facts the user shares about " +
+		"themselves (or anything they explicitly ask you to remember), and the 'forget' function to delete a memory by its key. "
+	if len(entries) == 0 {
+		return sentence + "You currently have no stored memories about the user.\n"
+	}
+	sentence += "Things you remember about the user (key: memory):\n"
+	for _, e := range entries {
+		sentence += "- " + e.Key + ": " + e.Text + "\n"
+	}
+	return sentence
+}
+
 func (ps *PromptSession) generateSystemPrompt(ctx context.Context) string {
 	ctx, span := beeline.StartSpan(ctx, "generate_system_prompt")
 	defer span.Send()
@@ -139,6 +161,7 @@ func (ps *PromptSession) generateSystemPrompt(ctx context.Context) string {
 		"If asked to perform language translation (e.g. 'what is X in french?' or 'how do you say X in german?'), *don't* look anything up - just respond immediately. You know how to do translations between any language pair. " +
 		"Your responses will be displayed on a very small screen, so be brief. Do not use markdown in your responses.\n" +
 		generateWidgetSentence(ctx) +
+		ps.generateMemorySentence(ctx) +
 		generateLanguageSentence(ctx) +
 		locationString +
 		ps.generateTimeSentence(ctx)

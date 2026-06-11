@@ -60,6 +60,12 @@ func NewTracker(redisClient *redis.Client, userId int) *Tracker {
 	}
 }
 
+// UserId returns the Rebble user ID this tracker is charging. It doubles as
+// the per-user key for other stores (e.g. long-term memory).
+func (q *Tracker) UserId() int {
+	return q.userId
+}
+
 func (q *Tracker) ChargeInputQuota(ctx context.Context, tokenCount int, cachedTokenCount int) (credits int, err error) {
 	credits = (tokenCount - cachedTokenCount) * InputTokenCredits + cachedTokenCount * CachedInputTokenCredits
 	total, err := q.chargeCredits(ctx, q.userId, credits)

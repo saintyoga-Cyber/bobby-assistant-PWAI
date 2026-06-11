@@ -49,6 +49,7 @@ type PromptSession struct {
 	redis            *redis.Client
 	threadId         uuid.UUID
 	originalThreadId string
+	userId           int
 }
 
 type QueryContext struct {
@@ -104,6 +105,7 @@ func (ps *PromptSession) Run(ctx context.Context) {
 		_ = ps.conn.Close(websocket.StatusInternalError, "get user info failed")
 		return
 	}
+	ps.userId = user.UserId
 	beeline.AddField(ctx, "user_id", user.UserId)
 	if !user.HasSubscription && !config.GetConfig().SelfHosted {
 		beeline.AddField(ctx, "error", "no subscription")
