@@ -14,14 +14,26 @@ your phone can reach.
 
 You will also need to set a few environment variables:
 
-- `GEMINI_KEY` - a key for Google's Gemini - you can get one at the
-  [Google AI Studio](https://aistudio.google.com)
-- `REDIS_URL` - a URL for a functioning Redis server. No data is persisted
-  long-term, so a purely in-memory server is fine.
+- `ANTHROPIC_API_KEY` - a key for Anthropic's Claude API - you can get one at
+  the [Claude Console](https://platform.claude.com). (This fork replaces the
+  upstream Gemini backend with Claude; `GEMINI_KEY` is no longer used.)
+- `REDIS_URL` - a URL for a functioning Redis server. Long-term memories are
+  stored in Redis, so enable persistence (AOF) or use a managed instance —
+  a purely in-memory server will lose memories on restart.
 - `USER_IDENTIFICATION_URL` - a URL pointing to an instance of
   [user-identifier](https://github.com/pebble-dev/user-identifier).
 - `MAPBOX_KEY` - an API key for [Mapbox](https://www.mapbox.com), which is
   used for geocoding. If no key is provided, geocoding will be unavailable.
+
+Optional:
+
+- `SELF_HOSTED=1` - skip the Rebble subscription check and lift the monthly
+  quota cap (for personal deployments).
+- `CHAT_MODEL` / `VERIFIER_MODEL` - exact Anthropic model ID strings; both
+  default to `claude-haiku-4-5`. Step up to e.g. `claude-sonnet-4-6` if
+  answer quality disappoints.
+- `PERPLEXITY_API_KEY` - enables the `web_search` function (live web answers
+  via Perplexity sonar). Without it, the assistant has no web search.
 
 ### Client
 
