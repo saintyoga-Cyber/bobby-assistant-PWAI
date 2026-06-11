@@ -30,6 +30,12 @@ type Config struct {
 	// quota cap for personal deployments. Set SELF_HOSTED=1 (or true/yes).
 	SelfHosted             bool
 	GeminiKey              string
+	AnthropicKey           string
+	// ChatModel and VerifierModel are exact Anthropic model ID strings, set
+	// via CHAT_MODEL / VERIFIER_MODEL. Changing tier is a deploy-time
+	// setting, not a code change.
+	ChatModel              string
+	VerifierModel          string
 	MapboxKey              string
 	IBMKey                 string
 	ExchangeRateApiKey     string
@@ -46,6 +52,13 @@ var c Config
 
 func GetConfig() *Config {
 	return &c
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func isTruthy(s string) bool {
@@ -69,6 +82,9 @@ func init() {
 		BaseURL:                os.Getenv("BASE_URL"),
 		SelfHosted:             isTruthy(os.Getenv("SELF_HOSTED")),
 		GeminiKey:              os.Getenv("GEMINI_KEY"),
+		AnthropicKey:           os.Getenv("ANTHROPIC_API_KEY"),
+		ChatModel:              envOr("CHAT_MODEL", "claude-haiku-4-5"),
+		VerifierModel:          envOr("VERIFIER_MODEL", "claude-haiku-4-5"),
 		MapboxKey:              os.Getenv("MAPBOX_KEY"),
 		IBMKey:                 os.Getenv("IBM_KEY"),
 		ExchangeRateApiKey:     os.Getenv("EXCHANGE_RATE_API_KEY"),

@@ -17,12 +17,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"github.com/honeycombio/beeline-go"
-	"github.com/pebble-dev/bobby-assistant/service/assistant/persistence"
-	"github.com/pebble-dev/bobby-assistant/service/assistant/quota"
-	"github.com/pebble-dev/bobby-assistant/service/assistant/verifier"
-	"github.com/pebble-dev/bobby-assistant/service/assistant/widgets"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -30,13 +25,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/google/uuid"
+	"github.com/honeycombio/beeline-go"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/config"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/functions"
+	"github.com/pebble-dev/bobby-assistant/service/assistant/llm"
+	"github.com/pebble-dev/bobby-assistant/service/assistant/persistence"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/query"
+	"github.com/pebble-dev/bobby-assistant/service/assistant/quota"
+	"github.com/pebble-dev/bobby-assistant/service/assistant/verifier"
+	"github.com/pebble-dev/bobby-assistant/service/assistant/widgets"
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/api/iterator"
-	"google.golang.org/genai"
 	"nhooyr.io/websocket"
 )
 
@@ -79,24 +80,14 @@ func NewPromptSession(redisClient *redis.Client, rw http.ResponseWriter, r *http
 
 func (ps *PromptSession) Run(ctx context.Context) {
 	ctx = query.ContextWith(ctx, ps.query)
-	geminiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  config.GetConfig().GeminiKey,
-		Backend: genai.BackendGeminiAPI,
-	})
-	if err != nil {
-		log.Printf("error creating Gemini client: %v\n", err)
-		_ = ps.conn.Close(websocket.StatusInternalError, "Error creating client.")
-		return
-	}
+	client := anthropic.NewClient(option.WithAPIKey(config.GetConfig().AnthropicKey))
 
-	var messages []*genai.Content
-	messages = append(messages, &genai.Content{
-		Parts: []*genai.Part{{Text: ps.prompt}},
-		Role:  "user",
-	})
+	var messages []anthropic.MessageParam
+	messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(ps.prompt)))
 
 	if ps.originalThreadId != "" {
 		var threadContext *persistence.ThreadContext
+		var err error
 		ctx, threadContext, err = ps.restoreContext(ctx, ps.originalThreadId)
 		if err != nil {
 			log.Printf("error restoring thread: %v\n", err)
@@ -142,62 +133,47 @@ func (ps *PromptSession) Run(ctx context.Context) {
 			ctx, span := beeline.StartSpan(ctx, "chat_iteration")
 			defer span.Send()
 			iterations++
-			var tools []*genai.Tool
-			if iterations <= 10 {
-				tools = []*genai.Tool{{FunctionDeclarations: functions.GetFunctionDefinitionsForCapabilities(query.SupportedActionsFromContext(ctx))}}
-			}
+			tools := llm.ToolsFromGenAI(functions.GetFunctionDefinitionsForCapabilities(query.SupportedActionsFromContext(ctx)))
 			systemPrompt := ps.generateSystemPrompt(ctx)
 			streamCtx, streamSpan := beeline.StartSpan(ctx, "chat_stream")
-			temperature := float32(0.5)
-			zero := int32(0)
-			s := geminiClient.Models.GenerateContentStream(streamCtx, "models/gemini-2.5-flash", messages, &genai.GenerateContentConfig{
-				SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: systemPrompt}}},
-				Temperature:       &temperature,
-				CandidateCount:    1,
-				Tools:             tools,
-				ThinkingConfig: &genai.ThinkingConfig{
-					IncludeThoughts: false,
-					ThinkingBudget:  &zero,
-				},
-			})
-			var functionCall *genai.FunctionCall
+			params := anthropic.MessageNewParams{
+				Model:       anthropic.Model(config.GetConfig().ChatModel),
+				MaxTokens:   4096,
+				Temperature: anthropic.Float(0.5),
+				System:      []anthropic.TextBlockParam{{Text: systemPrompt}},
+				Messages:    messages,
+				Tools:       tools,
+			}
+			if iterations > 10 {
+				// Force a final answer. The tool definitions must stay in the
+				// request (history contains tool_use blocks), but the model may
+				// not call them any more.
+				params.ToolChoice = anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}
+			}
+			stream := client.Messages.NewStreaming(streamCtx, params)
+			message := anthropic.Message{}
 			content := ""
-			var usageData *genai.GenerateContentResponseUsageMetadata
 			bufferedContent := ""
 			leftTrimming := false
 		read_loop:
-			for resp, err := range s {
-				if errors.Is(err, iterator.Done) {
-					break
+			for stream.Next() {
+				event := stream.Current()
+				if err := message.Accumulate(event); err != nil {
+					log.Printf("accumulate event failed: %v\n", err)
 				}
-				if err != nil {
-					streamSpan.AddField("error", err)
-					log.Printf("recv from Google failed: %v\n", err)
-					// This comes up when Google is over capacity, which does happen sometimes.
-					// There's nothing we can really do here, though we could blame them instead of ourselves.
-					_ = ps.conn.Close(websocket.StatusInternalError, "Bobby is unavailable right now. Please try again in a few moments.")
-					streamSpan.Send()
-					return false, err
-				}
-				usageData = resp.UsageMetadata
-				if len(resp.Candidates) == 0 {
+				deltaEvent, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent)
+				if !ok {
 					continue
 				}
-				choice := resp.Candidates[0]
-				ourContent := ""
-				for _, c := range choice.Content.Parts {
-					if c.Text != "" {
-						ourContent += fixUnsupportedCharacters(c.Text)
-					}
-					if c.FunctionCall != nil {
-						fc := *c.FunctionCall
-						functionCall = &fc
-					}
+				textDelta, ok := deltaEvent.Delta.AsAny().(anthropic.TextDelta)
+				if !ok {
+					continue
 				}
+				ourContent := fixUnsupportedCharacters(textDelta.Text)
 				if bufferedContent != "" {
 					bufferedContent += ourContent
 					closers := strings.Count(bufferedContent, "!>") + strings.Count(bufferedContent, "/>")
-					if strings.Count(bufferedContent, "<!") != closers {
+					if strings.Count(bufferedContent, "<!") != closers || strings.HasSuffix(bufferedContent, "<") {
 						continue
 					} else {
 						ourContent = bufferedContent
@@ -205,7 +181,9 @@ func (ps *PromptSession) Run(ctx context.Context) {
 					}
 				} else {
 					closers := strings.Count(ourContent, "!>") + strings.Count(ourContent, "/>")
-					if strings.Count(ourContent, "<!") != closers {
+					// Streaming deltas can split a widget marker anywhere, so
+					// also buffer when the delta ends on a potential "<!" start.
+					if strings.Count(ourContent, "<!") != closers || strings.HasSuffix(ourContent, "<") {
 						bufferedContent += ourContent
 						continue
 					}
@@ -266,66 +244,65 @@ func (ps *PromptSession) Run(ctx context.Context) {
 				}
 				content += ourContent
 			}
+			if err := stream.Err(); err != nil {
+				streamSpan.AddField("error", err)
+				log.Printf("recv from Anthropic failed: %v\n", err)
+				// This comes up when the API is over capacity, which does happen sometimes.
+				// There's nothing we can really do here, though we could blame them instead of ourselves.
+				_ = ps.conn.Close(websocket.StatusInternalError, "Bobby is unavailable right now. Please try again in a few moments.")
+				streamSpan.Send()
+				return false, err
+			}
 			streamSpan.Send()
-			if usageData != nil {
-				if usageData.PromptTokenCount != 0 {
-					_, err = qt.ChargeInputQuota(ctx, int(usageData.PromptTokenCount), int(usageData.CachedContentTokenCount))
-					if err != nil {
-						log.Printf("charge input quota failed: %v\n", err)
-					}
-					totalInputTokens += int(usageData.PromptTokenCount)
-					totalCachedInputTokens += int(usageData.CachedContentTokenCount)
+			usage := message.Usage
+			if usage.InputTokens != 0 || usage.CacheReadInputTokens != 0 {
+				// Anthropic reports cached tokens separately from input_tokens;
+				// the quota tracker expects the cached count to be included.
+				promptTokens := int(usage.InputTokens + usage.CacheReadInputTokens)
+				if _, err := qt.ChargeInputQuota(ctx, promptTokens, int(usage.CacheReadInputTokens)); err != nil {
+					log.Printf("charge input quota failed: %v\n", err)
 				}
-				if usageData.CandidatesTokenCount != 0 {
-					_, err = qt.ChargeOutputQuota(ctx, int(usageData.CandidatesTokenCount))
-					if err != nil {
-						log.Printf("charge output quota failed: %v\n", err)
-					}
-					totalOutputTokens += int(usageData.CandidatesTokenCount)
+				totalInputTokens += promptTokens
+				totalCachedInputTokens += int(usage.CacheReadInputTokens)
+			}
+			if usage.OutputTokens != 0 {
+				if _, err := qt.ChargeOutputQuota(ctx, int(usage.OutputTokens)); err != nil {
+					log.Printf("charge output quota failed: %v\n", err)
+				}
+				totalOutputTokens += int(usage.OutputTokens)
+			}
+			messages = append(messages, message.ToParam())
+			var toolUses []anthropic.ToolUseBlock
+			for _, block := range message.Content {
+				if tu, ok := block.AsAny().(anthropic.ToolUseBlock); ok {
+					toolUses = append(toolUses, tu)
 				}
 			}
-			if len(strings.TrimSpace(content)) > 0 {
-				messages = append(messages, &genai.Content{
-					Parts: []*genai.Part{{Text: content}},
-					Role:  "model",
-				})
-			}
-			if functionCall != nil {
-				messages = append(messages, &genai.Content{
-					Role: "model",
-					Parts: []*genai.Part{
-						{FunctionCall: functionCall},
-					},
-				})
-				log.Printf("calling function %s\n", functionCall.Name)
-				fnBytes, _ := json.Marshal(functionCall.Args)
-				fnArgs := string(fnBytes)
-				if err := ps.conn.Write(ctx, websocket.MessageText, []byte("f"+functions.SummariseFunction(functionCall.Name, fnArgs))); err != nil {
-					log.Printf("write to websocket failed: %v\n", err)
-					return false, err
+			if message.StopReason == anthropic.StopReasonToolUse && len(toolUses) > 0 {
+				var results []anthropic.ContentBlockParamUnion
+				for _, tu := range toolUses {
+					log.Printf("calling function %s\n", tu.Name)
+					fnArgs := string(tu.Input)
+					if err := ps.conn.Write(ctx, websocket.MessageText, []byte("f"+functions.SummariseFunction(tu.Name, fnArgs))); err != nil {
+						log.Printf("write to websocket failed: %v\n", err)
+						return false, err
+					}
+					var result string
+					var err error
+					if functions.IsAction(tu.Name) {
+						result, err = functions.CallAction(ctx, qt, tu.Name, fnArgs, ps.conn)
+					} else {
+						result, err = functions.CallFunction(ctx, qt, tu.Name, fnArgs)
+					}
+					isError := false
+					if err != nil {
+						log.Printf("call function failed: %v\n", err)
+						result = "failed to call function: " + err.Error()
+						isError = true
+					}
+					results = append(results, anthropic.NewToolResultBlock(tu.ID, result, isError))
 				}
-				var result string
-				var err error
-				if functions.IsAction(functionCall.Name) {
-					result, err = functions.CallAction(ctx, qt, functionCall.Name, fnArgs, ps.conn)
-				} else {
-					result, err = functions.CallFunction(ctx, qt, functionCall.Name, fnArgs)
-				}
-				if err != nil {
-					log.Printf("call function failed: %v\n", err)
-					result = "failed to call function: " + err.Error()
-				}
-				var mapResult map[string]any
-				_ = json.Unmarshal([]byte(result), &mapResult)
-				messages = append(messages, &genai.Content{
-					Role: "function",
-					Parts: []*genai.Part{
-						{FunctionResponse: &genai.FunctionResponse{
-							Name:     functionCall.Name,
-							Response: mapResult,
-						}},
-					},
-				})
+				messages = append(messages, anthropic.NewUserMessage(results...))
 				return true, nil
 			}
 			return false, nil
@@ -396,30 +373,60 @@ func fixUnsupportedCharacters(s string) string {
 	return strings.ReplaceAll(s, "\u202f", "\u00a0")
 }
 
-func (ps *PromptSession) storeThread(ctx context.Context, messages []*genai.Content) error {
+func (ps *PromptSession) storeThread(ctx context.Context, messages []anthropic.MessageParam) error {
 	ctx, span := beeline.StartSpan(ctx, "store_thread")
 	defer span.Send()
 	var toStore []persistence.SerializedMessage
+	toolNames := map[string]string{}
 	for _, m := range messages {
-		if len(m.Parts) != 0 {
-			if m.Role == "user" || m.Role == "model" {
-				sm := persistence.SerializedMessage{
-					Role:         m.Role,
-					Content:      m.Parts[0].Text,
-					FunctionCall: m.Parts[0].FunctionCall,
+		role := "user"
+		if m.Role == anthropic.MessageParamRoleAssistant {
+			role = "model"
+		}
+		for _, block := range m.Content {
+			switch {
+			case block.OfText != nil:
+				if len(strings.TrimSpace(block.OfText.Text)) > 0 {
+					toStore = append(toStore, persistence.SerializedMessage{
+						Role:    role,
+						Content: block.OfText.Text,
+					})
 				}
-				if sm.FunctionCall != nil || len(strings.TrimSpace(m.Parts[0].Text)) > 0 {
-					toStore = append(toStore, sm)
+			case block.OfToolUse != nil:
+				tu := block.OfToolUse
+				toolNames[tu.ID] = tu.Name
+				toStore = append(toStore, persistence.SerializedMessage{
+					Role: role,
+					FunctionCall: &persistence.FunctionCall{
+						ID:   tu.ID,
+						Name: tu.Name,
+						Args: anyToMap(tu.Input),
+					},
+				})
+			case block.OfToolResult != nil:
+				tr := block.OfToolResult
+				name := toolNames[tr.ToolUseID]
+				text := ""
+				for _, c := range tr.Content {
+					if c.OfText != nil {
+						text += c.OfText.Text
+					}
 				}
-			} else if m.Role == "function" && m.Parts[0].FunctionResponse != nil {
-				fr := *m.Parts[0].FunctionResponse
-				fnInfo := functions.GetFunctionRegistration(fr.Name)
+				var response map[string]any
+				if err := json.Unmarshal([]byte(text), &response); err != nil || response == nil {
+					response = map[string]any{"result": text}
+				}
+				fnInfo := functions.GetFunctionRegistration(name)
 				if fnInfo != nil && fnInfo.RedactOutputInChatHistory {
-					fr.Response = map[string]any{"redacted": "redacted to reduce context size, call again if necessary"}
+					response = map[string]any{"redacted": "redacted to reduce context size, call again if necessary"}
 				}
 				toStore = append(toStore, persistence.SerializedMessage{
-					Role:             m.Role,
-					FunctionResponse: &fr,
+					Role: "function",
+					FunctionResponse: &persistence.FunctionResponse{
+						ID:       tr.ToolUseID,
+						Name:     name,
+						Response: response,
+					},
 				})
 			}
 		}
@@ -427,6 +434,20 @@ func (ps *PromptSession) storeThread(ctx context.Context, messages []*genai.Cont
 	threadContext := query.ThreadContextFromContext(ctx)
 	threadContext.Messages = toStore
 	return persistence.StoreThread(ctx, ps.redis, threadContext)
+}
+
+// anyToMap converts a tool input (json.RawMessage from a model response, or a
+// map restored from storage) into a plain map for serialization.
+func anyToMap(input any) map[string]any {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 func (ps *PromptSession) restoreContext(ctx context.Context, oldThreadId string) (context.Context, *persistence.ThreadContext, error) {
@@ -439,13 +460,42 @@ func (ps *PromptSession) restoreContext(ctx context.Context, oldThreadId string)
 	return ctx, threadContext, nil
 }
 
-func (ps *PromptSession) restoreThread(threadContext *persistence.ThreadContext) []*genai.Content {
-	var result []*genai.Content
+func (ps *PromptSession) restoreThread(threadContext *persistence.ThreadContext) []anthropic.MessageParam {
+	var result []anthropic.MessageParam
+	syntheticIds := 0
+	lastToolUseId := ""
 	for _, m := range threadContext.Messages {
-		result = append(result, &genai.Content{
-			Parts: []*genai.Part{{Text: m.Content, FunctionCall: m.FunctionCall, FunctionResponse: m.FunctionResponse}},
-			Role:  m.Role,
-		})
+		switch {
+		case m.FunctionCall != nil:
+			id := m.FunctionCall.ID
+			if id == "" {
+				// Threads stored before the Anthropic migration have no tool
+				// call IDs; synthesize matching pairs.
+				syntheticIds++
+				id = fmt.Sprintf("toolu_restored_%d", syntheticIds)
+			}
+			lastToolUseId = id
+			result = append(result, anthropic.NewAssistantMessage(
+				anthropic.NewToolUseBlock(id, m.FunctionCall.Args, m.FunctionCall.Name)))
+		case m.FunctionResponse != nil:
+			id := m.FunctionResponse.ID
+			if id == "" {
+				id = lastToolUseId
+			}
+			if id == "" {
+				continue
+			}
+			respBytes, err := json.Marshal(m.FunctionResponse.Response)
+			if err != nil {
+				continue
+			}
+			result = append(result, anthropic.NewUserMessage(
+				anthropic.NewToolResultBlock(id, string(respBytes), false)))
+		case m.Role == "user":
+			result = append(result, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
+		case strings.TrimSpace(m.Content) != "":
+			result = append(result, anthropic.NewAssistantMessage(anthropic.NewTextBlock(m.Content)))
+		}
 	}
 	return result
 }

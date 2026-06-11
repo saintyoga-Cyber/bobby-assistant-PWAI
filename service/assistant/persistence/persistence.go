@@ -21,15 +21,29 @@ import (
 	"github.com/honeycombio/beeline-go"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/util"
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/genai"
 	"time"
 )
 
+// FunctionCall and FunctionResponse are provider-neutral. Their JSON tags
+// match the genai types they replaced, so previously stored threads and the
+// feedback report template keep working.
+type FunctionCall struct {
+	ID   string         `json:"id,omitempty"`
+	Name string         `json:"name,omitempty"`
+	Args map[string]any `json:"args,omitempty"`
+}
+
+type FunctionResponse struct {
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name,omitempty"`
+	Response map[string]any `json:"response,omitempty"`
+}
+
 type SerializedMessage struct {
-	Role             string                  `json:"role"`
-	Content          string                  `json:"content"`
-	FunctionCall     *genai.FunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *genai.FunctionResponse `json:"functionResponse,omitempty"`
+	Role             string            `json:"role"`
+	Content          string            `json:"content"`
+	FunctionCall     *FunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *FunctionResponse `json:"functionResponse,omitempty"`
 }
 
 type StoredContext struct {
