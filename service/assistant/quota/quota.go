@@ -21,6 +21,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/pebble-dev/bobby-assistant/service/assistant/config"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -36,6 +37,16 @@ const RouteCalculationCredits = 400_000
 const GPlacesLookupProCredits = 680_000
 const MapImageCredits = 80_000
 const MonthlyQuotaCredits = 80_000_000
+
+// monthlyQuotaCredits returns the effective monthly budget. Self-hosted
+// deployments pay their own API bills, so the cap is effectively removed
+// (usage is still tracked in Redis for visibility).
+func monthlyQuotaCredits() int {
+	if config.GetConfig().SelfHosted {
+		return 1 << 60
+	}
+	return MonthlyQuotaCredits
+}
 
 type Tracker struct {
 	redis  *redis.Client
@@ -65,7 +76,7 @@ func (q *Tracker) GetQuota(ctx context.Context) (used, remaining int, err error)
 	defer span.Send()
 	result := q.redis.Get(ctx, keyForUserQuota(q.userId))
 	if result.Err() == redis.Nil {
-		return 0, MonthlyQuotaCredits, nil
+		return 0, monthlyQuotaCredits(), nil
 	}
 	if result.Err() != nil {
 		return 0, 0, result.Err()
@@ -74,7 +85,7 @@ func (q *Tracker) GetQuota(ctx context.Context) (used, remaining int, err error)
 	if err != nil {
 		return 0, 0, err
 	}
-	return used, MonthlyQuotaCredits - used, nil
+	return used, monthlyQuotaCredits() - used, nil
 }
 
 func keyForUserQuota(user int) string {

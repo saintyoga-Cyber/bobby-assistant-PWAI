@@ -17,6 +17,7 @@ package config
 import (
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -25,6 +26,9 @@ import (
 
 type Config struct {
 	BaseURL                string
+	// SelfHosted disables the Rebble subscription requirement and the monthly
+	// quota cap for personal deployments. Set SELF_HOSTED=1 (or true/yes).
+	SelfHosted             bool
 	GeminiKey              string
 	MapboxKey              string
 	IBMKey                 string
@@ -44,6 +48,14 @@ func GetConfig() *Config {
 	return &c
 }
 
+func isTruthy(s string) bool {
+	switch strings.ToLower(s) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 func init() {
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
@@ -55,6 +67,7 @@ func init() {
 
 	c = Config{
 		BaseURL:                os.Getenv("BASE_URL"),
+		SelfHosted:             isTruthy(os.Getenv("SELF_HOSTED")),
 		GeminiKey:              os.Getenv("GEMINI_KEY"),
 		MapboxKey:              os.Getenv("MAPBOX_KEY"),
 		IBMKey:                 os.Getenv("IBM_KEY"),

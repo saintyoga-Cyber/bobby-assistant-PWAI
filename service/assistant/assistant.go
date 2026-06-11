@@ -17,6 +17,7 @@ package assistant
 import (
 	"encoding/json"
 	"github.com/honeycombio/beeline-go/wrappers/hnynethttp"
+	"github.com/pebble-dev/bobby-assistant/service/assistant/config"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/feedback"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/quota"
 	"log"
@@ -63,7 +64,7 @@ func (s *Service) handleQuota(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, err.Error(), http.StatusNotFound)
 		return
 	}
-	if !userInfo.HasSubscription {
+	if !userInfo.HasSubscription && !config.GetConfig().SelfHosted {
 		response, err := json.Marshal(map[string]any{
 			"used":            0,
 			"remaining":       0,

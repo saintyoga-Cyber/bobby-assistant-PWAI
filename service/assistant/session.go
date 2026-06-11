@@ -114,7 +114,7 @@ func (ps *PromptSession) Run(ctx context.Context) {
 		return
 	}
 	beeline.AddField(ctx, "user_id", user.UserId)
-	if !user.HasSubscription {
+	if !user.HasSubscription && !config.GetConfig().SelfHosted {
 		beeline.AddField(ctx, "error", "no subscription")
 		log.Printf("user %d has no subscription\n", user.UserId)
 		_ = ps.conn.Close(websocket.StatusPolicyViolation, "You need an active Rebble subscription to use Bobby.")
