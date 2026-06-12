@@ -48,7 +48,8 @@ func init() {
 	var err error
 	routingClient, err = routing.NewRoutesClient(context.Background(), option.WithScopes("https://www.googleapis.com/auth/cloud-platform"))
 	if err != nil {
-		panic(err)
+		log.Printf("Failed to create routing client: %v; find_route function disabled", err)
+		return
 	}
 	registerFunction(Registration{
 		Definition: genai.FunctionDeclaration{
@@ -225,6 +226,9 @@ func nullableTimestrampFromString(timeStr string) (*timestamppb.Timestamp, error
 func findRoute(ctx context.Context, quotaTracker *quota.Tracker, args any) any {
 	ctx, span := beeline.StartSpan(ctx, "find_route")
 	defer span.Send()
+	if routingClient == nil {
+		return Error{Error: "Routing unavailable: Google Cloud credentials not configured"}
+	}
 	arg := args.(*RoutingQuery)
 
 	origin, err := waypointFromString(ctx, arg.Origin)
