@@ -1,0 +1,10 @@
+[build]
+dockerfilePath = "Dockerfile-service"
+
+[deploy]
+startCommand = "/app"
+healthcheckPath = "/heartbeat"
+healthcheckTimeout = 30
+
+[[services]]
+internalPort = 8080

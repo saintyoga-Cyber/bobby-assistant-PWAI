@@ -65,11 +65,17 @@ func (s *Service) handleQuota(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "No token provided.", http.StatusNotFound)
 		return
 	}
-	userInfo, err := quota.GetUserInfo(ctx, token)
-	if err != nil {
-		log.Printf("Error getting user info: %v", err)
-		http.Error(rw, err.Error(), http.StatusNotFound)
-		return
+	var userInfo *quota.UserInfo
+	if config.GetConfig().SelfHosted {
+		userInfo = &quota.UserInfo{UserId: 0, HasSubscription: true}
+	} else {
+		var err error
+		userInfo, err = quota.GetUserInfo(ctx, token)
+		if err != nil {
+			log.Printf("Error getting user info: %v", err)
+			http.Error(rw, err.Error(), http.StatusNotFound)
+			return
+		}
 	}
 	if !userInfo.HasSubscription && !config.GetConfig().SelfHosted {
 		response, err := json.Marshal(map[string]any{

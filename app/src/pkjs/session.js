@@ -23,8 +23,17 @@ var widgets = require('./widgets');
 var messageQueue = require('./lib/message_queue').Queue;
 var features = require('./features');
 
-var API_URL = require('./urls').QUERY_URL;
+var DEFAULT_API_URL = require('./urls').QUERY_URL;
 var package_json = require('package.json');
+
+function getApiUrl() {
+    var settings = JSON.parse(localStorage.getItem('clay-settings')) || {};
+    var serverUrl = (settings['SERVER_URL'] || '').trim();
+    if (serverUrl) {
+        return serverUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/query';
+    }
+    return DEFAULT_API_URL;
+}
 
 function Session(prompt, threadId) {
     this.prompt = prompt;
@@ -42,7 +51,7 @@ Session.prototype.run = function() {
         messageQueue.startLogging();
     }
     console.log("Opening websocket connection...");
-    var url = API_URL + '?prompt=' + encodeURIComponent(this.prompt) + '&token=' + exports.userToken;
+    var url = getApiUrl() + '?prompt=' + encodeURIComponent(this.prompt) + '&token=' + exports.userToken;
     if (location.isReady() && config.isLocationEnabled()) {
         var loc = location.getPos();
         url += '&lon=' + loc.lon + '&lat=' + loc.lat;

@@ -16,10 +16,19 @@
 
 var session = require('./session');
 
-var QUOTA_URL = require('./urls').QUOTA_URL;
+var DEFAULT_QUOTA_URL = require('./urls').QUOTA_URL;
+
+function getQuotaUrl() {
+    var settings = JSON.parse(localStorage.getItem('clay-settings')) || {};
+    var serverUrl = (settings['SERVER_URL'] || '').trim();
+    if (serverUrl) {
+        return serverUrl.replace(/\/$/, '') + '/quota';
+    }
+    return DEFAULT_QUOTA_URL;
+}
 
 exports.fetchQuota = function(callback) {
-    var url = QUOTA_URL;
+    var url = getQuotaUrl();
     url += '?token=' + session.userToken;
     console.log("Fetching quota from " + url);
     var req = new XMLHttpRequest();

@@ -99,11 +99,17 @@ func (ps *PromptSession) Run(ctx context.Context) {
 		messages = append(oldMessages, messages...)
 	}
 	query.ThreadContextFromContext(ctx).ThreadId = ps.threadId
-	user, err := quota.GetUserInfo(ctx, ps.userToken)
-	if err != nil {
-		log.Printf("get user info failed: %v\n", err)
-		_ = ps.conn.Close(websocket.StatusInternalError, "get user info failed")
-		return
+	var user *quota.UserInfo
+	if config.GetConfig().SelfHosted {
+		user = &quota.UserInfo{UserId: 0, HasSubscription: true}
+	} else {
+		var err error
+		user, err = quota.GetUserInfo(ctx, ps.userToken)
+		if err != nil {
+			log.Printf("get user info failed: %v\n", err)
+			_ = ps.conn.Close(websocket.StatusInternalError, "get user info failed")
+			return
+		}
 	}
 	ps.userId = user.UserId
 	beeline.AddField(ctx, "user_id", user.UserId)

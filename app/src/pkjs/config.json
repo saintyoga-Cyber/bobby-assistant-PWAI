@@ -140,6 +140,27 @@
         ]
     },
     {
+        "type": "section",
+        "items": [
+            {
+                "type": "heading",
+                "defaultValue": "Connection"
+            },
+            {
+                "type": "input",
+                "id": "serverUrl",
+                "messageKey": "SERVER_URL",
+                "label": "Custom server URL",
+                "description": "For self-hosted deployments only. Enter your server's base URL (e.g. https://bobby.up.railway.app). Leave blank to use the default Rebble server.",
+                "defaultValue": "",
+                "attributes": {
+                    "placeholder": "https://your-app.up.railway.app",
+                    "type": "url"
+                }
+            }
+        ]
+    },
+    {
         "type": "submit",
         "defaultValue": "Save"
     }
