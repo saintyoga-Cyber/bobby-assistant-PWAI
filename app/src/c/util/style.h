@@ -19,7 +19,8 @@
 
 #include <pebble.h>
 
-#define ACCENT_COLOUR GColorShockingPink
+// Claude brand orange (#D97757), quantised to the Pebble palette.
+#define ACCENT_COLOUR GColorSunsetOrange
 #define BRANDED_BACKGROUND_COLOUR COLOR_FALLBACK(ACCENT_COLOUR, GColorWhite)
 #define SELECTION_HIGHLIGHT_COLOUR COLOR_FALLBACK(ACCENT_COLOUR, GColorBlack)
 

@@ -200,7 +200,7 @@ static void prv_app_message_received(DictionaryIterator *iter, void *context) {
     result_window_push("Sent", "Thank you!", image, BRANDED_BACKGROUND_COLOUR);
   } else {
     GDrawCommandImage *image = bgdraw_command_image_create_with_resource(RESOURCE_ID_FAILED_PONY);
-    result_window_push("Error", "There was a problem 🙁", image, COLOR_FALLBACK(GColorSunsetOrange, GColorWhite));
+    result_window_push("Error", "There was a problem 🙁", image, COLOR_FALLBACK(GColorRed, GColorWhite));
   }
   window_stack_remove(window, false);
 }

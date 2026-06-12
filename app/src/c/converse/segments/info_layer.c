@@ -16,6 +16,7 @@
 
 #include "info_layer.h"
 #include "../../util/fonts.h"
+#include "../../util/style.h"
 #include "../../util/memory/malloc.h"
 #include "../../util/memory/sdk.h"
 #include <pebble.h>
@@ -254,7 +255,7 @@ static GColor prv_get_stripe_color(ConversationEntry* entry) {
     case EntryTypeError:
       return GColorRed;
     case EntryTypeAction:
-      return GColorShockingPink;
+      return ACCENT_COLOUR;
     default:
       return GColorOrange;
   }
