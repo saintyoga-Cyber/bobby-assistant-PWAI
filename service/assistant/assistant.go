@@ -19,6 +19,7 @@ import (
 	"github.com/honeycombio/beeline-go/wrappers/hnynethttp"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/config"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/feedback"
+	"github.com/pebble-dev/bobby-assistant/service/assistant/mcp"
 	"github.com/pebble-dev/bobby-assistant/service/assistant/quota"
 	"log"
 	"net/http"
@@ -43,6 +44,12 @@ func NewService(r *redis.Client) *Service {
 	s.mux.HandleFunc("/report", feedback.HandleReport)
 	s.mux.HandleFunc("/reported-thread/", feedback.HandleShowReport)
 	s.mux.HandleFunc("/robots.txt", s.handleRobots)
+	if mcp.Enabled() {
+		// Remote MCP server exposing long-term memory (shared with claude.ai
+		// etc.). Only registered when MCP_AUTH_TOKEN is set.
+		s.mux.Handle("/mcp", mcp.NewHandler(r))
+		log.Printf("MCP memory endpoint enabled at /mcp for user %d.", config.GetConfig().MCPMemoryUserId)
+	}
 	return s
 }
 

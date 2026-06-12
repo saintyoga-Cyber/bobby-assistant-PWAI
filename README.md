@@ -34,6 +34,22 @@ Optional:
   answer quality disappoints.
 - `PERPLEXITY_API_KEY` - enables the `web_search` function (live web answers
   via Perplexity sonar). Without it, the assistant has no web search.
+- `MCP_AUTH_TOKEN` - enables a remote MCP server at `/mcp` that exposes your
+  long-term memory (the same store the watch uses) to MCP clients such as
+  claude.ai. This is the bearer token a client must present. Leave unset to
+  disable the endpoint.
+- `MCP_MEMORY_USER_ID` - the Rebble user ID whose memory `/mcp` reads and
+  writes. The service logs your ID on every request (`user N has used ...`);
+  run one watch query, find `N`, and set it here.
+
+### Sharing memory with claude.ai (optional)
+
+With `MCP_AUTH_TOKEN` and `MCP_MEMORY_USER_ID` set, add your server as a
+custom connector in claude.ai (Settings → Connectors → Add custom connector),
+pointing at `https://your-server/mcp` with the bearer token. Claude on your
+phone and computer can then read and write the same memories your watch
+assistant uses (`list_memories`, `remember`, `forget`). Your Redis is the
+single source of truth — this does not touch Anthropic's own account memory.
 
 ### Client
 

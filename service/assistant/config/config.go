@@ -17,6 +17,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -39,6 +40,14 @@ type Config struct {
 	// PerplexityKey enables the web_search function. If unset, the function
 	// is not registered and the model never sees it.
 	PerplexityKey          string
+	// MCPAuthToken, if set, enables the /mcp endpoint (a remote MCP server
+	// exposing the user's long-term memory to claude.ai etc.). The token is
+	// the shared secret a client must present as a bearer token.
+	MCPAuthToken           string
+	// MCPMemoryUserId is the Rebble user ID whose memory the /mcp endpoint
+	// reads and writes. The service logs each user's ID on every request
+	// ("user N has used ..."), so set this to your own ID.
+	MCPMemoryUserId        int
 	MapboxKey              string
 	IBMKey                 string
 	ExchangeRateApiKey     string
@@ -62,6 +71,18 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func atoiOr(s string, fallback int) int {
+	if s == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		log.Printf("invalid integer env value %q: %v", s, err)
+		return fallback
+	}
+	return n
 }
 
 func isTruthy(s string) bool {
@@ -89,6 +110,8 @@ func init() {
 		ChatModel:              envOr("CHAT_MODEL", "claude-haiku-4-5"),
 		VerifierModel:          envOr("VERIFIER_MODEL", "claude-haiku-4-5"),
 		PerplexityKey:          os.Getenv("PERPLEXITY_API_KEY"),
+		MCPAuthToken:           os.Getenv("MCP_AUTH_TOKEN"),
+		MCPMemoryUserId:        atoiOr(os.Getenv("MCP_MEMORY_USER_ID"), 0),
 		MapboxKey:              os.Getenv("MAPBOX_KEY"),
 		IBMKey:                 os.Getenv("IBM_KEY"),
 		ExchangeRateApiKey:     os.Getenv("EXCHANGE_RATE_API_KEY"),
