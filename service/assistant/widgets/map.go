@@ -40,11 +40,16 @@ const destinationDotURL = "https://storage.googleapis.com/bobby-assets/destinati
 var mapClient *gmaps.Client
 
 func init() {
-	var err error
 	c := config.GetConfig()
+	if c.GoogleMapsStaticKey == "" {
+		log.Printf("GOOGLE_MAPS_STATIC_KEY not set; map widgets disabled")
+		return
+	}
+	var err error
 	mapClient, err = gmaps.NewClient(gmaps.WithAPIKeyAndSignature(c.GoogleMapsStaticKey, c.GoogleMapsStaticSecret))
 	if err != nil {
-		panic(err)
+		log.Printf("Failed to create Google Maps client: %v; map widgets disabled", err)
+		return
 	}
 	googleLogo2Bit, err = png.Decode(bytes.NewReader(googleLogo2BitBytes))
 	if err != nil {
@@ -65,6 +70,9 @@ type MapWidget struct {
 }
 
 func poiWidget(ctx context.Context, qt *quota.Tracker, markerString, includeLocationString string) (*MapWidget, error) {
+	if mapClient == nil {
+		return nil, fmt.Errorf("map widgets unavailable: GOOGLE_MAPS_STATIC_KEY not configured")
+	}
 	includeLocation := strings.EqualFold(includeLocationString, "true")
 	markers := make(map[string]util.Coords)
 	threadContext := query.ThreadContextFromContext(ctx)
@@ -125,6 +133,9 @@ func poiWidget(ctx context.Context, qt *quota.Tracker, markerString, includeLoca
 }
 
 func routeWidget(ctx context.Context, qt *quota.Tracker) (*MapWidget, error) {
+	if mapClient == nil {
+		return nil, fmt.Errorf("map widgets unavailable: GOOGLE_MAPS_STATIC_KEY not configured")
+	}
 	threadContext := query.ThreadContextFromContext(ctx)
 	routeInfo := threadContext.ContextStorage.LastRoute
 	if routeInfo == nil {
