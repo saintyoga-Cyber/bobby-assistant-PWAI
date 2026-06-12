@@ -110,7 +110,8 @@ static void prv_window_appear(Window* window) {
 #else
   uint16_t time_height = 40;
 #endif
-  rw->time_layer = btext_layer_create(GRect(0, 5, bounds.size.w - ACTION_BAR_WIDTH, time_height));
+  // On round displays the top corners are cut by the bezel, so start lower.
+  rw->time_layer = btext_layer_create(GRect(0, PBL_IF_ROUND_ELSE(18, 5), bounds.size.w - ACTION_BAR_WIDTH, time_height));
   text_layer_set_text_alignment(rw->time_layer, GTextAlignmentCenter);
 #if PBL_DISPLAY_WIDTH >= 200
   text_layer_set_font(rw->time_layer, fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS));
@@ -120,7 +121,8 @@ static void prv_window_appear(Window* window) {
   text_layer_set_text(rw->time_layer, "12:34");
   text_layer_set_background_color(rw->time_layer, GColorClear);
   layer_add_child(window_get_root_layer(rw->window), (Layer *)rw->time_layer);
-  rw->talking_horse_layer = talking_horse_layer_create(GRect(0, time_height + 16, bounds.size.w - ACTION_BAR_WIDTH, bounds.size.h - time_height - 16));
+  const int16_t horse_top = PBL_IF_ROUND_ELSE(18, 0) + time_height + 16;
+  rw->talking_horse_layer = talking_horse_layer_create(GRect(0, horse_top, bounds.size.w - ACTION_BAR_WIDTH, bounds.size.h - horse_top - PBL_IF_ROUND_ELSE(14, 0)));
   layer_add_child(window_get_root_layer(rw->window), (Layer *)rw->talking_horse_layer);
   rw->talking_horse_overridden = false;
   if (version_is_updated() || rand() < RAND_MAX / 10) {
@@ -133,7 +135,8 @@ static void prv_window_appear(Window* window) {
   rw->version_string[sizeof(rw->version_string) - 1] = '\0';
   rw->version_layer = btext_layer_create(GRect(0, bounds.size.h - 18, bounds.size.w - ACTION_BAR_WIDTH - 4, 18));
   text_layer_set_font(rw->version_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-  text_layer_set_text_alignment(rw->version_layer, GTextAlignmentRight);
+  // Bottom-right is clipped by the bezel on round displays; centre it there.
+  text_layer_set_text_alignment(rw->version_layer, PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentRight));
   text_layer_set_background_color(rw->version_layer, GColorClear);
   text_layer_set_text(rw->version_layer, rw->version_string);
   layer_add_child(window_get_root_layer(rw->window), (Layer *)rw->version_layer);

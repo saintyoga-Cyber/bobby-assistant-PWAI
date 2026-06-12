@@ -107,7 +107,7 @@ static void prv_window_load(Window *window) {
   resource_load(blurb_handle, (uint8_t *)data->blurb, blurb_length);
   data->blurb[blurb_length] = '\0';
 
-  data->text_layer = formatted_text_layer_create(GRect(5, 5, bounds.size.w - 10, 2000));
+  data->text_layer = formatted_text_layer_create(GRect(PBL_IF_ROUND_ELSE(22, 5), 5, bounds.size.w - PBL_IF_ROUND_ELSE(44, 10), 2000));
   formatted_text_layer_set_text(data->text_layer, data->blurb);
   GSize text_size = formatted_text_layer_get_content_size(data->text_layer);
   layer_set_frame(formatted_text_layer_get_layer(data->text_layer), GRect(5, 5, bounds.size.w - 10, text_size.h));

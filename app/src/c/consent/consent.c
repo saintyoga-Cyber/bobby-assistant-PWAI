@@ -101,10 +101,10 @@ static void prv_window_load(Window *window) {
   const FontsConfig *fonts = fonts_get_config();
   data->scroll_layer = bscroll_layer_create(window_bounds);
   scroll_layer_set_click_config_onto_window(data->scroll_layer, window);
-  data->title_layer = btext_layer_create(GRect(0, 0, window_bounds.size.w, 60));
+  data->title_layer = btext_layer_create(GRect(0, PBL_IF_ROUND_ELSE(14, 0), window_bounds.size.w, 60));
   text_layer_set_text_alignment(data->title_layer, GTextAlignmentCenter);
   text_layer_set_font(data->title_layer, fonts->title_font);
-  data->text_layer = btext_layer_create(GRect(10, 30, window_bounds.size.w - 20, window_bounds.size.h - 30));
+  data->text_layer = btext_layer_create(GRect(PBL_IF_ROUND_ELSE(24, 10), PBL_IF_ROUND_ELSE(44, 30), window_bounds.size.w - PBL_IF_ROUND_ELSE(48, 20), window_bounds.size.h - 30));
   text_layer_set_font(data->text_layer, fonts->text_font);
   data->select_indicator_bitmap = bgbitmap_create_with_resource(RESOURCE_ID_BUTTON_INDICATOR);
   GRect select_indicator_size = gbitmap_get_bounds(data->select_indicator_bitmap);

@@ -125,7 +125,7 @@ static void prv_window_load(Window *window) {
   action_bar_layer_set_context(data->action_bar, window);
   action_bar_layer_set_click_config_provider(data->action_bar, prv_click_config_provider);
   action_bar_layer_add_to_window(data->action_bar, window);
-  data->animation_layer = vector_sequence_layer_create(GRect((rect.size.w - ACTION_BAR_WIDTH) / 2 - 25, rect.size.h - 55, 50, 50));
+  data->animation_layer = vector_sequence_layer_create(GRect((rect.size.w - ACTION_BAR_WIDTH) / 2 - 25, rect.size.h - PBL_IF_ROUND_ELSE(64, 55), 50, 50));
   data->draw_commands = bgdraw_command_sequence_create_with_resource(RESOURCE_ID_TIRED_PONY);
   data->vibes = prv_load_vibe_score(data->is_timer);
   vector_sequence_layer_set_sequence(data->animation_layer, data->draw_commands);

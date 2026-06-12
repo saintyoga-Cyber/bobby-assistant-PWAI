@@ -133,7 +133,9 @@ static void prv_update_layer(Layer *layer, GContext *ctx) {
   GRect text_bounds = GRect(8 + corner_offset + available_space, speech_bubble_top + corner_offset - 5, data->text_size.w, data->text_size.h);
   graphics_draw_text(ctx, data->text, data->font, text_bounds, GTextOverflowModeWordWrap, GTextAlignmentLeft, data->text_attributes);
   GSize pony_bounds = gdraw_command_image_get_bounds_size(data->pony);
-  gdraw_command_image_draw(ctx, data->pony, GPoint(0, size.h - pony_bounds.h));
+  // On round displays the bottom-left corner is cut by the bezel; nudge the
+  // mascot inward so it stays fully visible.
+  gdraw_command_image_draw(ctx, data->pony, GPoint(PBL_IF_ROUND_ELSE(26, 0), size.h - pony_bounds.h));
 }
 
 static GTextAttributes* prv_create_text_attributes(TalkingHorseLayer *layer) {
@@ -154,7 +156,8 @@ static GRangeHorizontal prv_perimeter_callback(const GPerimeter *perimeter, cons
   GSize pony_bounds = gdraw_command_image_get_bounds_size(data->pony);
   const int16_t pony_size = pony_bounds.h;
   GRect bounds = layer_get_bounds(layer);
-  GPoint wrap_point = layer_convert_point_to_screen(layer, GPoint(pony_size, bounds.size.h - pony_size));
+  // Keep in sync with the mascot inset in prv_update_layer.
+  GPoint wrap_point = layer_convert_point_to_screen(layer, GPoint(PBL_IF_ROUND_ELSE(26, 0) + pony_size, bounds.size.h - pony_size));
   // We know the pony is at the bottom of our layer, so we don't bother worrying about text being rendered past it.
   if (vertical_range.origin_y + vertical_range.size_h < wrap_point.y) {
     // nothing to do here - implement the inset while we're here, though.

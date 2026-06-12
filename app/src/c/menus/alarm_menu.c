@@ -71,6 +71,9 @@ static void prv_window_load(Window* window) {
   const FontsConfig *fonts = fonts_get_config();
   data->menu_layer = bmenu_layer_create(GRect(0, STATUS_BAR_LAYER_HEIGHT, window_bounds.size.w, window_bounds.size.h - STATUS_BAR_LAYER_HEIGHT));
   menu_layer_set_highlight_colors(data->menu_layer, SELECTION_HIGHLIGHT_COLOUR, gcolor_legible_over(SELECTION_HIGHLIGHT_COLOUR));
+#ifdef PBL_ROUND
+  menu_layer_set_center_focused(data->menu_layer, true);
+#endif
   menu_layer_set_callbacks(data->menu_layer, window, (MenuLayerCallbacks) {
     .get_num_rows = prv_get_num_rows,
     .draw_row = prv_draw_row,

@@ -65,7 +65,7 @@ static void prv_window_load(Window* window) {
   scroll_layer_set_click_config_onto_window(data->scroll_layer, window);
   scroll_layer_set_shadow_hidden(data->scroll_layer, true);
   data->usage_layer = usage_layer_create(GRect(10, 5, bounds.size.w - 20, 20));
-  data->explanation_layer = btext_layer_create(GRect(10, 25, bounds.size.w - 20, 750));
+  data->explanation_layer = btext_layer_create(GRect(PBL_IF_ROUND_ELSE(24, 10), 25, bounds.size.w - PBL_IF_ROUND_ELSE(48, 20), 750));
   text_layer_set_font(data->explanation_layer, fonts->text_font);
   scroll_layer_add_child(data->scroll_layer, (Layer *)data->explanation_layer);
   scroll_layer_add_child(data->scroll_layer, (Layer *)data->usage_layer);

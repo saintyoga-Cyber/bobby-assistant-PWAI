@@ -21,6 +21,7 @@
     ],
     "targetPlatforms": [
       "basalt",
+      "chalk",
       "diorite",
       "emery"
     ],
@@ -334,6 +335,7 @@
           "type": "bitmap",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },
@@ -352,6 +354,7 @@
           "type": "bitmap",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },
@@ -370,6 +373,7 @@
           "type": "bitmap",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },
@@ -388,6 +392,7 @@
           "type": "bitmap",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },
@@ -406,6 +411,7 @@
           "type": "bitmap",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },
@@ -424,6 +430,7 @@
           "type": "bitmap",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },
@@ -442,6 +449,7 @@
           "type": "bitmap",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },
@@ -491,6 +499,7 @@
           "memoryFormat": "2BitPalette",
           "targetPlatforms": [
             "basalt",
+            "chalk",
             "emery"
           ]
         },

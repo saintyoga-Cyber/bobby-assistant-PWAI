@@ -151,7 +151,7 @@ static void prv_window_load(Window *window) {
   sw->content_height = 0;
   sw->last_prompt_end_offset = 0;
   sw->scroll_indicator_down = blayer_create(GRect(0, window_size.h - STATUS_BAR_LAYER_HEIGHT, window_size.w, STATUS_BAR_LAYER_HEIGHT));
-  sw->scroll_layer = bscroll_layer_create(GRect(0, STATUS_BAR_LAYER_HEIGHT, window_size.w, window_size.h - STATUS_BAR_LAYER_HEIGHT));
+  sw->scroll_layer = bscroll_layer_create(GRect(PBL_IF_ROUND_ELSE(14, 0), STATUS_BAR_LAYER_HEIGHT, window_size.w - PBL_IF_ROUND_ELSE(28, 0), window_size.h - STATUS_BAR_LAYER_HEIGHT));
   scroll_layer_set_shadow_hidden(sw->scroll_layer, true);
   ContentIndicator* indicator = scroll_layer_get_content_indicator(sw->scroll_layer);
   const ContentIndicatorConfig up_config = (ContentIndicatorConfig) {
