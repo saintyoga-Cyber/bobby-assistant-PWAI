@@ -17,6 +17,7 @@
 #include "conversation_manager.h"
 
 #include "conversation.h"
+#include "offline_commands.h"
 #include "../util/memory/malloc.h"
 #include "../util/memory/pressure.h"
 #include "../util/logging.h"
@@ -97,10 +98,19 @@ void conversation_manager_set_deletion_handler(ConversationManager* manager, Con
 }
 
 void conversation_manager_add_input(ConversationManager* manager, const char* input) {
-  DictionaryIterator *iter;
-  AppMessageResult result = app_message_outbox_begin(&iter);
   conversation_add_prompt(manager->conversation, input);
   prv_conversation_updated(manager, true);
+
+  // Offline quick commands: handle simple timer/alarm requests on-watch with
+  // no round trip to the service. Works with no connectivity, and is instant
+  // and free when connected. Anything not recognised falls through to the
+  // service exactly as before.
+  if (offline_commands_try(manager, input)) {
+    return;
+  }
+
+  DictionaryIterator *iter;
+  AppMessageResult result = app_message_outbox_begin(&iter);
   if (result != APP_MSG_OK) {
     BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Preparing outbox failed: %d.", result);
     conversation_add_error(manager->conversation, "Sending to service failed.");
@@ -128,6 +138,11 @@ void conversation_manager_add_input(ConversationManager* manager, const char* in
     prv_conversation_updated(manager, true);
     return;
   }
+}
+
+void conversation_manager_add_response(ConversationManager* manager, const char* text) {
+  conversation_add_response(manager->conversation, text);
+  prv_conversation_updated(manager, true);
 }
 
 void conversation_manager_add_action(ConversationManager* manager, ConversationAction* action) {

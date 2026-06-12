@@ -174,6 +174,19 @@ int alarm_manager_cancel_alarm(time_t when, bool is_timer) {
   return E_INVALID_ARGUMENT;
 }
 
+bool alarm_manager_cancel_first(bool is_timer) {
+  // pending_alarms is kept sorted by ascending scheduled_time, so the first
+  // match is the soonest one.
+  for (int i = 0; i < s_manager.pending_alarm_count; ++i) {
+    if (s_manager.pending_alarms[i].is_timer == is_timer) {
+      prv_remove_alarm(i);
+      prv_save_alarms();
+      return true;
+    }
+  }
+  return false;
+}
+
 Alarm* alarm_manager_get_alarm(int index) {
   return &s_manager.pending_alarms[index];
 }

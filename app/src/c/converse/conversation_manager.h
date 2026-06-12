@@ -31,6 +31,9 @@ void conversation_manager_destroy(ConversationManager* manager);
 void conversation_manager_set_handler(ConversationManager* manager, ConversationManagerUpdateHandler handler, void* context);
 void conversation_manager_set_deletion_handler(ConversationManager* manager, ConversationManagerEntryDeletedHandler handler);
 void conversation_manager_add_input(ConversationManager* manager, const char* input);
+// Adds a complete assistant text response and notifies the UI. Used by the
+// offline quick-command path to confirm a locally-handled request.
+void conversation_manager_add_response(ConversationManager* manager, const char* text);
 void conversation_manager_add_action(ConversationManager* manager, ConversationAction* action);
 void conversation_manager_add_widget(ConversationManager* manager, ConversationWidget* widget);
 Conversation* conversation_manager_get_conversation(ConversationManager* manager);
