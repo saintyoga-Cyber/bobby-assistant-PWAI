@@ -17,6 +17,11 @@
 var reminders = require('./lib/reminders');
 
 function handleReminderMessage(data) {
+  if (data.OFFLINE_REMINDER_TEXT && data.OFFLINE_REMINDER_TIME) {
+    console.log('Offline reminder: ' + data.OFFLINE_REMINDER_TEXT);
+    reminders.addReminder(data.OFFLINE_REMINDER_TEXT, data.OFFLINE_REMINDER_TIME * 1000);
+    return true;
+  }
   if (data.REMINDER_LIST_REQUEST) {
     var allReminders = reminders.getAllReminders();
     

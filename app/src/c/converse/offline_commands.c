@@ -499,6 +499,84 @@ static bool prv_contains_token(const TokenList *tl, int from, const char *word) 
 #define NAME_BUF_SIZE 32
 
 // ---------------------------------------------------------------------------
+// Reminder helper — parses time+text and sends to phone via AppMessage.
+// The phone creates the Rebble timeline pin (same as Note to Self approach).
+// No wakeup API, no new windows, no alarm manager involvement.
+// ---------------------------------------------------------------------------
+
+static bool prv_match_reminder(ConversationManager *manager,
+                               const TokenList *tl, int j) {
+  if (j < tl->count &&
+      (prv_eq(tl->tokens[j], "to") || prv_eq(tl->tokens[j], "that") ||
+       prv_eq(tl->tokens[j], "about"))) {
+    j++;
+  }
+
+  time_t when = 0;
+  char text_buf[NAME_BUF_SIZE] = {0};
+
+  if (j < tl->count &&
+      (prv_eq(tl->tokens[j], "at") || prv_eq(tl->tokens[j], "in"))) {
+    bool use_duration = prv_eq(tl->tokens[j], "in");
+    int k = j + 1;
+    if (use_duration) {
+      int secs = prv_parse_duration(tl, &k);
+      if (secs < 0) return false;
+      when = time(NULL) + secs;
+    } else {
+      ClockTime ct;
+      if (!prv_parse_clock(tl, &k, &ct)) return false;
+      when = prv_next_occurrence(&ct);
+    }
+    if (k < tl->count &&
+        (prv_eq(tl->tokens[k], "to") || prv_eq(tl->tokens[k], "that"))) {
+      k++;
+    }
+    if (k >= tl->count) return false;
+    prv_build_name(tl, k, tl->count, text_buf, NAME_BUF_SIZE);
+  } else {
+    int text_start = j, text_end = -1;
+    for (int k = text_start; k < tl->count; ++k) {
+      if (prv_eq(tl->tokens[k], "at") || prv_eq(tl->tokens[k], "in")) {
+        bool use_duration = prv_eq(tl->tokens[k], "in");
+        int try_idx = k + 1;
+        if (use_duration) {
+          int secs = prv_parse_duration(tl, &try_idx);
+          if (secs >= 0) { when = time(NULL) + secs; text_end = k; break; }
+        } else {
+          ClockTime ct;
+          if (prv_parse_clock(tl, &try_idx, &ct)) {
+            when = prv_next_occurrence(&ct); text_end = k; break;
+          }
+        }
+      }
+    }
+    if (text_end < 0 || when == 0 || text_end <= text_start) return false;
+    prv_build_name(tl, text_start, text_end, text_buf, NAME_BUF_SIZE);
+  }
+
+  if (when == 0 || text_buf[0] == '\0') return false;
+
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    conversation_manager_add_response(manager,
+        "Can't reach phone. Reminder not set.");
+    return true;
+  }
+  dict_write_cstring(iter, MESSAGE_KEY_OFFLINE_REMINDER_TEXT, text_buf);
+  dict_write_int32(iter, MESSAGE_KEY_OFFLINE_REMINDER_TIME, (int32_t)when);
+  app_message_outbox_send();
+
+  char timestr[16];
+  prv_format_clock(when, timestr, sizeof(timestr));
+  char msg[80];
+  snprintf(msg, sizeof(msg), "Reminder for %s: %s.", timestr, text_buf);
+  conversation_manager_add_response(manager, msg);
+  BOBBY_LOG(APP_LOG_LEVEL_INFO, "Forwarded reminder to phone at %d", (int)when);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -581,6 +659,15 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
       j++;
     }
     j = prv_skip_article(&tl, j);
+    if (j < tl.count && prv_eq(tl.tokens[j], "reminder")) {
+      j++;
+      if (j < tl.count &&
+          (prv_eq(tl.tokens[j], "to") || prv_eq(tl.tokens[j], "for") ||
+           prv_eq(tl.tokens[j], "about"))) {
+        j++;
+      }
+      return prv_match_reminder(manager, &tl, j);
+    }
     if (j >= tl.count) {
       return false;
     }
@@ -674,6 +761,14 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline alarm for %d.", (int)when);
       return true;
     }
+  }
+
+  // --- Reminder: "remind me ..." -------------------------------------------
+  if (prv_eq(tl.tokens[i], "remind")) {
+    int j = i + 1;
+    if (j >= tl.count || !prv_eq(tl.tokens[j], "me")) return false;
+    j++;
+    return prv_match_reminder(manager, &tl, j);
   }
 
   // --- B2: List / query timers & alarms ------------------------------------

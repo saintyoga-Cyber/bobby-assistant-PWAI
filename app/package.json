@@ -110,6 +110,8 @@
       "MAP_WIDGET_USER_LOCATION",
       "CONFIRM_TRANSCRIPTS",
       "AI_ENABLED",
+      "OFFLINE_REMINDER_TEXT",
+      "OFFLINE_REMINDER_TIME",
       "ACTION_SETTINGS_UPDATED"
     ],
     "resources": {
