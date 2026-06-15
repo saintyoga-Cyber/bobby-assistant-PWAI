@@ -21,6 +21,7 @@
 #include "../util/logging.h"
 
 #include "alarm_window.h"
+#include "reminder_window.h"
 
 #include <pebble-events/pebble-events.h>
 #include <pebble.h>
@@ -29,7 +30,9 @@ struct Alarm {
   time_t scheduled_time;
   WakeupId wakeup_id;
   char *name;
-  bool is_timer; // what's the difference between an alarm and a timer? the user's intention.
+  bool is_timer;     // what's the difference between an alarm and a timer? the user's intention.
+  bool is_reminder;  // wakeup-based reminder (fires even offline)
+  bool pin_synced;   // cloud timeline pin has been created for this reminder
 };
 
 struct AlarmManager {
@@ -46,6 +49,8 @@ static void prv_remove_alarm(int to_remove);
 static void prv_handle_app_message_inbox_received(DictionaryIterator *iterator, void *context);
 static void prv_send_alarm_response(StatusCode response);
 static void prv_wakeup_handler(WakeupId wakeup_id, int32_t cookie);
+static void prv_try_send_pin_sync(Alarm *a);
+static void prv_sync_deferred(void *context);
 
 #define MAX_ALARMS 8
 #define ALARM_NAME_SIZE 32
@@ -187,6 +192,64 @@ bool alarm_manager_cancel_first(bool is_timer) {
   return false;
 }
 
+int alarm_manager_add_reminder(time_t when, const char *text) {
+  if (s_manager.pending_alarm_count >= MAX_ALARMS) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Not scheduling reminder: MAX_ALARMS reached.");
+    return E_OUT_OF_RESOURCES;
+  }
+  WakeupId id = wakeup_schedule(when, when, true);
+  BOBBY_LOG(APP_LOG_LEVEL_INFO, "reminder wakeup_schedule(%d) -> %d", (int)when, (int)id);
+  if (id < 0) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Scheduling reminder failed: %d", (int)id);
+    return (int)id;
+  }
+  Alarm *alarm = bmalloc(sizeof(Alarm));
+  alarm->scheduled_time = when;
+  alarm->wakeup_id = id;
+  alarm->is_timer = false;
+  alarm->is_reminder = true;
+  alarm->pin_synced = false;
+  alarm->name = NULL;
+  if (text && text[0] != '\0') {
+    size_t len = strlen(text);
+    if (len >= ALARM_NAME_SIZE) len = ALARM_NAME_SIZE - 1;
+    alarm->name = bmalloc(len + 1);
+    strncpy(alarm->name, text, len + 1);
+    alarm->name[len] = '\0';
+  }
+
+  ++s_manager.pending_alarm_count;
+  if (s_manager.pending_alarm_count == 1) {
+    s_manager.pending_alarms = alarm;
+  } else {
+    Alarm *new_alarms = bmalloc(sizeof(Alarm) * s_manager.pending_alarm_count);
+    int ins = 0;
+    bool inserted = false;
+    for (int k = 0; k < s_manager.pending_alarm_count - 1; ++k) {
+      if (!inserted && s_manager.pending_alarms[k].scheduled_time >= alarm->scheduled_time) {
+        new_alarms[ins++] = *alarm;
+        inserted = true;
+      }
+      new_alarms[ins++] = s_manager.pending_alarms[k];
+    }
+    if (!inserted) {
+      new_alarms[ins] = *alarm;
+    }
+    free(s_manager.pending_alarms);
+    s_manager.pending_alarms = new_alarms;
+    free(alarm);
+  }
+  prv_save_alarms();
+  // Attempt immediate cloud-pin sync.
+  for (int k = 0; k < s_manager.pending_alarm_count; ++k) {
+    if (s_manager.pending_alarms[k].wakeup_id == id) {
+      prv_try_send_pin_sync(&s_manager.pending_alarms[k]);
+      break;
+    }
+  }
+  return 0;
+}
+
 Alarm* alarm_manager_get_alarm(int index) {
   return &s_manager.pending_alarms[index];
 }
@@ -215,7 +278,17 @@ static void prv_load_alarms() {
   persist_read_data(PERSIST_KEY_ALARM_WAKEUP_IDS, &wakeup_ids, sizeof(wakeup_ids));
   persist_read_data(PERSIST_KEY_ALARM_IS_TIMERS, &is_timers, sizeof(is_timers));
   persist_read_data(PERSIST_KEY_ALARM_NAMES, &names, sizeof(names));
-  
+  bool is_reminders[MAX_ALARMS];
+  bool pin_synced_arr[MAX_ALARMS];
+  memset(is_reminders, 0, sizeof(is_reminders));
+  memset(pin_synced_arr, 0, sizeof(pin_synced_arr));
+  if (persist_exists(PERSIST_KEY_ALARM_IS_REMINDERS)) {
+    persist_read_data(PERSIST_KEY_ALARM_IS_REMINDERS, &is_reminders, sizeof(is_reminders));
+  }
+  if (persist_exists(PERSIST_KEY_ALARM_PIN_SYNCED)) {
+    persist_read_data(PERSIST_KEY_ALARM_PIN_SYNCED, &pin_synced_arr, sizeof(pin_synced_arr));
+  }
+
   s_manager.pending_alarms = bmalloc(sizeof(Alarm) * alarm_count);
   s_manager.pending_alarm_count = alarm_count;
   
@@ -236,6 +309,8 @@ static void prv_load_alarms() {
     alarm->scheduled_time = times[i];
     alarm->wakeup_id = wakeup_ids[i];
     alarm->is_timer = is_timers[i];
+    alarm->is_reminder = is_reminders[i];
+    alarm->pin_synced = pin_synced_arr[i];
     size_t name_len = strlen(names[i]);
     if (name_len >= ALARM_NAME_SIZE) {
       name_len = ALARM_NAME_SIZE - 1;
@@ -253,6 +328,17 @@ static void prv_load_alarms() {
     BOBBY_LOG(APP_LOG_LEVEL_INFO, "Updating saved data after dropping entries.");
     prv_save_alarms();
   }
+  // Schedule deferred cloud-pin sync for any unsynced reminders.
+  bool has_unsynced = false;
+  for (int k = 0; k < s_manager.pending_alarm_count; ++k) {
+    if (s_manager.pending_alarms[k].is_reminder && !s_manager.pending_alarms[k].pin_synced) {
+      has_unsynced = true;
+      break;
+    }
+  }
+  if (has_unsynced) {
+    app_timer_register(3000, prv_sync_deferred, NULL);
+  }
 }
 
 static void prv_save_alarms() {
@@ -263,6 +349,8 @@ static void prv_save_alarms() {
     persist_delete(PERSIST_KEY_ALARM_WAKEUP_IDS);
     persist_delete(PERSIST_KEY_ALARM_IS_TIMERS);
     persist_delete(PERSIST_KEY_ALARM_NAMES);
+    persist_delete(PERSIST_KEY_ALARM_IS_REMINDERS);
+    persist_delete(PERSIST_KEY_ALARM_PIN_SYNCED);
     persist_delete(PERSIST_KEY_ALARM_COUNT_TWO);
     wakeup_cancel_all();
   }
@@ -271,11 +359,17 @@ static void prv_save_alarms() {
   bool is_timers[MAX_ALARMS];
   char names[MAX_ALARMS][ALARM_NAME_SIZE];
   memset(names, 0, sizeof(names));
+  bool is_reminders[MAX_ALARMS];
+  bool pin_synced_arr[MAX_ALARMS];
+  memset(is_reminders, 0, sizeof(is_reminders));
+  memset(pin_synced_arr, 0, sizeof(pin_synced_arr));
   for (int i = 0; i < s_manager.pending_alarm_count; ++i) {
     Alarm* alarm = &s_manager.pending_alarms[i];
     times[i] = alarm->scheduled_time;
     wakeup_ids[i] = alarm->wakeup_id;
     is_timers[i] = alarm->is_timer;
+    is_reminders[i] = alarm->is_reminder;
+    pin_synced_arr[i] = alarm->pin_synced;
     if (alarm->name) {
       strncpy(names[i], alarm->name, ALARM_NAME_SIZE);
       names[i][ALARM_NAME_SIZE - 1] = '\0';
@@ -289,6 +383,8 @@ static void prv_save_alarms() {
   persist_write_data(PERSIST_KEY_ALARM_WAKEUP_IDS, &wakeup_ids, sizeof(wakeup_ids));
   persist_write_data(PERSIST_KEY_ALARM_IS_TIMERS, &is_timers, sizeof(is_timers));
   persist_write_data(PERSIST_KEY_ALARM_NAMES, &names, sizeof(names));
+  persist_write_data(PERSIST_KEY_ALARM_IS_REMINDERS, &is_reminders, sizeof(is_reminders));
+  persist_write_data(PERSIST_KEY_ALARM_PIN_SYNCED, &pin_synced_arr, sizeof(pin_synced_arr));
   persist_write_int(PERSIST_KEY_ALARM_COUNT_TWO, s_manager.pending_alarm_count);
   BOBBY_LOG(APP_LOG_LEVEL_INFO, "Wrote %d alarms.", s_manager.pending_alarm_count);
 }
@@ -360,7 +456,11 @@ bool alarm_manager_maybe_alarm() {
     BOBBY_LOG(APP_LOG_LEVEL_INFO, "comparing %d == %d", alarm->wakeup_id, id);
     if (alarm->wakeup_id == id) {
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "alarm found! alarming...");
-      alarm_window_push(alarm->scheduled_time, alarm->is_timer, alarm->name);
+      if (alarm->is_reminder) {
+        reminder_window_push(alarm->name);
+      } else {
+        alarm_window_push(alarm->scheduled_time, alarm->is_timer, alarm->name);
+      }
       prv_remove_alarm(i);
       return true;
     }
@@ -477,6 +577,25 @@ static void prv_handle_app_message_inbox_received(DictionaryIterator *iterator, 
   if (tuple != NULL) {
     prv_handle_cancel_alarm_request(iterator, context);
   }
+  tuple = dict_find(iterator, MESSAGE_KEY_REMINDER_PIN_SYNCED);
+  if (tuple != NULL) {
+    const char *synced_id = tuple->value->cstring;
+    for (int k = 0; k < s_manager.pending_alarm_count; ++k) {
+      Alarm *a = &s_manager.pending_alarms[k];
+      if (a->is_reminder && !a->pin_synced) {
+        char pin_id[24];
+        snprintf(pin_id, sizeof(pin_id), "brmnd-%d", (int)a->wakeup_id);
+        if (strcmp(synced_id, pin_id) == 0) {
+          a->pin_synced = true;
+          prv_save_alarms();
+          BOBBY_LOG(APP_LOG_LEVEL_INFO, "Reminder pin synced: %s", synced_id);
+          // Try next unsynced reminder
+          app_timer_register(500, prv_sync_deferred, NULL);
+          break;
+        }
+      }
+    }
+  }
 }
 
 static void prv_send_alarm_response(StatusCode response) {
@@ -495,6 +614,41 @@ static void prv_send_alarm_response(StatusCode response) {
   BOBBY_LOG(APP_LOG_LEVEL_INFO, "Sent alarm response %d", response);
 }
 
+static void prv_try_send_pin_sync(Alarm *a) {
+  if (!a || !a->is_reminder || a->pin_synced || !a->name) return;
+  char pin_id[24];
+  snprintf(pin_id, sizeof(pin_id), "brmnd-%d", (int)a->wakeup_id);
+  DictionaryIterator *iter;
+  AppMessageResult result = app_message_outbox_begin(&iter);
+  if (result != APP_MSG_OK) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Pin sync outbox begin failed: %d", result);
+    return;
+  }
+  dict_write_cstring(iter, MESSAGE_KEY_SYNC_REMINDER_PIN_ID, pin_id);
+  dict_write_int32(iter, MESSAGE_KEY_SYNC_REMINDER_PIN_TIME, (int32_t)a->scheduled_time);
+  dict_write_cstring(iter, MESSAGE_KEY_SYNC_REMINDER_PIN_TEXT, a->name);
+  result = app_message_outbox_send();
+  if (result != APP_MSG_OK) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Pin sync outbox send failed: %d", result);
+  } else {
+    BOBBY_LOG(APP_LOG_LEVEL_INFO, "Sent pin sync for %s", pin_id);
+  }
+}
+
+static void prv_sync_deferred(void *context) {
+  for (int k = 0; k < s_manager.pending_alarm_count; ++k) {
+    Alarm *a = &s_manager.pending_alarms[k];
+    if (a->is_reminder && !a->pin_synced) {
+      prv_try_send_pin_sync(a);
+      return;  // one at a time; next fires after ack
+    }
+  }
+}
+
+void alarm_manager_sync_pending_reminders(void) {
+  prv_sync_deferred(NULL);
+}
+
 static void prv_wakeup_handler(WakeupId wakeup_id, int32_t cookie) {
   BOBBY_LOG(APP_LOG_LEVEL_INFO, "it's the wakeup handler! (%d, %d)", wakeup_id, cookie);
   for (int i = 0; i < s_manager.pending_alarm_count; ++i) {
@@ -502,7 +656,11 @@ static void prv_wakeup_handler(WakeupId wakeup_id, int32_t cookie) {
     BOBBY_LOG(APP_LOG_LEVEL_INFO, "comparing %d == %d", alarm->wakeup_id, wakeup_id);
     if (alarm->wakeup_id == wakeup_id) {
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "alarm found! alarming...");
-      alarm_window_push(alarm->scheduled_time, alarm->is_timer, alarm->name);
+      if (alarm->is_reminder) {
+        reminder_window_push(alarm->name);
+      } else {
+        alarm_window_push(alarm->scheduled_time, alarm->is_timer, alarm->name);
+      }
       prv_remove_alarm(i);
       break;
     }

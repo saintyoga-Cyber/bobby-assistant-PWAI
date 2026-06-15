@@ -144,6 +144,22 @@
         "items": [
             {
                 "type": "heading",
+                "defaultValue": "Assistant"
+            },
+            {
+                "type": "toggle",
+                "messageKey": "AI_ENABLED",
+                "defaultValue": true,
+                "label": "Enable AI assistant",
+                "description": "When disabled, Bobby only handles offline commands (timers, alarms, reminders, time, date, battery). No data is sent to the server."
+            }
+        ]
+    },
+    {
+        "type": "section",
+        "items": [
+            {
+                "type": "heading",
                 "defaultValue": "Connection"
             },
             {

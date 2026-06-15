@@ -25,6 +25,7 @@
 
 #include <pebble-events/pebble-events.h>
 #include <pebble.h>
+#include "../settings/settings.h"
 
 
 struct ConversationManager {
@@ -106,6 +107,12 @@ void conversation_manager_add_input(ConversationManager* manager, const char* in
   // and free when connected. Anything not recognised falls through to the
   // service exactly as before.
   if (offline_commands_try(manager, input)) {
+    return;
+  }
+
+  if (!settings_get_ai_enabled()) {
+    conversation_add_error(manager->conversation, "AI is disabled in settings.");
+    prv_conversation_updated(manager, true);
     return;
   }
 
