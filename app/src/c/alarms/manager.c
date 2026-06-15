@@ -63,7 +63,7 @@ void alarm_manager_init() {
   prv_load_alarms();
 }
 
-int alarm_manager_add_alarm(time_t when, bool is_timer, char* name, bool conversational) {
+int alarm_manager_add_alarm(time_t when, bool is_timer, const char* name, bool conversational) {
   if (s_manager.pending_alarm_count >= MAX_ALARMS) {
     BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Not scheduling alarm because MAX_ALARMS (%d) was already reached.", MAX_ALARMS);
     return E_OUT_OF_RESOURCES;

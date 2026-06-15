@@ -23,7 +23,7 @@ typedef struct AlarmManager AlarmManager;
 typedef struct Alarm Alarm;
 
 void alarm_manager_init();
-int alarm_manager_add_alarm(time_t when, bool is_timer, char* name, bool conversational);
+int alarm_manager_add_alarm(time_t when, bool is_timer, const char* name, bool conversational);
 int alarm_manager_cancel_alarm(time_t when, bool is_timer);
 // Cancels the soonest pending alarm (is_timer=false) or timer (is_timer=true).
 // Returns true if one was found and cancelled. Used by the offline
