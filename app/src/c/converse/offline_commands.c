@@ -432,6 +432,14 @@ static bool prv_is_cancel_verb(const char *t) {
          prv_eq(t, "clear") || prv_eq(t, "remove");
 }
 
+static bool prv_is_timer_word(const char *t) {
+  return prv_eq(t, "timer") || prv_eq(t, "timers");
+}
+
+static bool prv_is_alarm_word(const char *t) {
+  return prv_eq(t, "alarm") || prv_eq(t, "alarms");
+}
+
 // Advances past an optional leading "please".
 static int prv_skip_pleasantries(const TokenList *tl, int idx) {
   if (idx < tl->count && prv_eq(tl->tokens[idx], "please")) {
@@ -449,6 +457,139 @@ static int prv_skip_article(const TokenList *tl, int idx) {
   return idx;
 }
 
+// Build a name string from tl->tokens[start..end) into buf (size buf_len).
+static void prv_build_name(const TokenList *tl, int start, int end,
+                           char *buf, int buf_len) {
+  int pos = 0;
+  for (int k = start; k < end && pos < buf_len - 1; ++k) {
+    if (k > start && pos < buf_len - 2) {
+      buf[pos++] = ' ';
+    }
+    for (const char *p = tl->tokens[k]; *p && pos < buf_len - 1; ++p) {
+      buf[pos++] = *p;
+    }
+  }
+  buf[pos] = '\0';
+}
+
+// Format a future alarm time as "H:MM AM/PM" and write to buf.
+static void prv_format_clock(time_t when, char *buf, size_t buf_len) {
+  struct tm lt = *localtime(&when);
+  strftime(buf, buf_len, "%l:%M %p", &lt);
+  // %l pads with a leading space; remove it.
+  char *p = buf;
+  while (*p == ' ') {
+    memmove(buf, buf + 1, buf_len - 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// B4: Time / date / battery helpers
+// ---------------------------------------------------------------------------
+
+static bool prv_contains_token(const TokenList *tl, int from, const char *word) {
+  for (int k = from; k < tl->count; ++k) {
+    if (prv_eq(tl->tokens[k], word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// C2: Reminder matching helper
+// Called with j pointing to the token after "me" (or after "reminder" + opt
+// "to"/"for"). Attempts to parse "remind me [to] <text> at/in <time>" or
+// "remind me at/in <time> to <text>" forms.
+// Returns true and calls alarm_manager_add_reminder on success.
+// ---------------------------------------------------------------------------
+#define REMINDER_TEXT_SIZE 32
+
+static bool prv_match_reminder(ConversationManager *manager,
+                               const TokenList *tl, int j) {
+  // Skip optional "to" / "that" / "about"
+  if (j < tl->count &&
+      (prv_eq(tl->tokens[j], "to") || prv_eq(tl->tokens[j], "that") ||
+       prv_eq(tl->tokens[j], "about"))) {
+    j++;
+  }
+
+  time_t when = 0;
+  char text_buf[REMINDER_TEXT_SIZE] = {0};
+
+  // Check whether time preposition comes FIRST ("remind me at 5pm to buy milk")
+  if (j < tl->count &&
+      (prv_eq(tl->tokens[j], "at") || prv_eq(tl->tokens[j], "in"))) {
+    bool use_duration = prv_eq(tl->tokens[j], "in");
+    int k = j + 1;
+    if (use_duration) {
+      int secs = prv_parse_duration(tl, &k);
+      if (secs < 0) return false;
+      when = time(NULL) + secs;
+    } else {
+      ClockTime ct;
+      if (!prv_parse_clock(tl, &k, &ct)) return false;
+      when = prv_next_occurrence(&ct);
+    }
+    // Optional "to" / "that" before the text
+    if (k < tl->count &&
+        (prv_eq(tl->tokens[k], "to") || prv_eq(tl->tokens[k], "that"))) {
+      k++;
+    }
+    if (k >= tl->count) return false;
+    prv_build_name(tl, k, tl->count, text_buf, REMINDER_TEXT_SIZE);
+  } else {
+    // Text comes first: collect tokens until we hit "at"/"in" + parseable time.
+    int text_end = -1;
+    int text_start = j;
+
+    for (int k = text_start; k < tl->count; ++k) {
+      if (prv_eq(tl->tokens[k], "at") || prv_eq(tl->tokens[k], "in")) {
+        bool use_duration = prv_eq(tl->tokens[k], "in");
+        int try_idx = k + 1;
+        if (use_duration) {
+          int secs = prv_parse_duration(tl, &try_idx);
+          if (secs >= 0) {
+            when = time(NULL) + secs;
+            text_end = k;
+            break;
+          }
+        } else {
+          ClockTime ct;
+          if (prv_parse_clock(tl, &try_idx, &ct)) {
+            when = prv_next_occurrence(&ct);
+            text_end = k;
+            break;
+          }
+        }
+      }
+    }
+
+    if (text_end < 0 || when == 0) return false;
+    if (text_end <= text_start) return false;
+    prv_build_name(tl, text_start, text_end, text_buf, REMINDER_TEXT_SIZE);
+  }
+
+  if (when == 0 || text_buf[0] == '\0') return false;
+
+  int result = alarm_manager_add_reminder(when, text_buf);
+  if (result != 0) {
+    conversation_manager_add_response(manager, "Sorry, I couldn't set that reminder.");
+    return true;
+  }
+  char timestr[16];
+  prv_format_clock(when, timestr, sizeof(timestr));
+  char msg[80];
+  snprintf(msg, sizeof(msg), "Reminder set for %s: %s.", timestr, text_buf);
+  conversation_manager_add_response(manager, msg);
+  BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline reminder.");
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
 bool offline_commands_try(ConversationManager *manager, const char *input) {
   TokenList tl;
   if (!prv_tokenize(input, &tl)) {
@@ -460,34 +601,67 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
     return false;
   }
 
-  // --- Cancel timer / alarm ------------------------------------------------
+  // --- Cancel timer / alarm (single or all) ---------------------------------
   if (prv_is_cancel_verb(tl.tokens[i])) {
-    int j = prv_skip_article(&tl, i + 1);
+    int j = i + 1;
+    j = prv_skip_article(&tl, j);
     if (j >= tl.count) {
       return false;
     }
+
+    // B3: cancel all
+    if (prv_eq(tl.tokens[j], "all")) {
+      j++;
+      j = prv_skip_article(&tl, j);
+      if (j >= tl.count) return false;
+      bool is_timer;
+      if (prv_is_timer_word(tl.tokens[j])) {
+        is_timer = true;
+      } else if (prv_is_alarm_word(tl.tokens[j])) {
+        is_timer = false;
+      } else {
+        return false;
+      }
+      int count = 0;
+      while (alarm_manager_cancel_first(is_timer)) {
+        count++;
+      }
+      char msg[64];
+      if (count == 0) {
+        snprintf(msg, sizeof(msg), "No %s to cancel.",
+                 is_timer ? "timers" : "alarms");
+      } else {
+        snprintf(msg, sizeof(msg), "Cancelled %d %s.", count,
+                 count == 1 ? (is_timer ? "timer" : "alarm")
+                             : (is_timer ? "timers" : "alarms"));
+      }
+      conversation_manager_add_response(manager, msg);
+      BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline cancel-all.");
+      return true;
+    }
+
+    // Single cancel
     bool is_timer;
-    if (prv_eq(tl.tokens[j], "timer") || prv_eq(tl.tokens[j], "timers")) {
+    if (prv_is_timer_word(tl.tokens[j])) {
       is_timer = true;
-    } else if (prv_eq(tl.tokens[j], "alarm") || prv_eq(tl.tokens[j], "alarms")) {
+    } else if (prv_is_alarm_word(tl.tokens[j])) {
       is_timer = false;
     } else {
       return false;
     }
-    // Only match if that's essentially the whole command.
-    if (j + 1 < tl.count) {
-      return false;
-    }
     if (alarm_manager_cancel_first(is_timer)) {
-      conversation_manager_add_response(manager, is_timer ? "Timer cancelled." : "Alarm cancelled.");
+      conversation_manager_add_response(manager,
+          is_timer ? "Timer cancelled." : "Alarm cancelled.");
     } else {
-      conversation_manager_add_response(manager, is_timer ? "You have no timer to cancel." : "You have no alarm to cancel.");
+      conversation_manager_add_response(manager,
+          is_timer ? "You have no timer to cancel."
+                   : "You have no alarm to cancel.");
     }
     BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline cancel command.");
     return true;
   }
 
-  // --- Set timer / alarm ---------------------------------------------------
+  // --- Set timer / alarm (B1 looser phrasing) / set reminder (C2) ----------
   if (prv_is_set_verb(tl.tokens[i])) {
     int j = i + 1;
     // Optional "me" as in "set me a timer".
@@ -499,17 +673,57 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
       return false;
     }
 
-    bool is_timer;
-    if (prv_eq(tl.tokens[j], "timer")) {
-      is_timer = true;
-    } else if (prv_eq(tl.tokens[j], "alarm")) {
-      is_timer = false;
-    } else {
+    // C2 variant: "set a reminder ..."
+    if (prv_eq(tl.tokens[j], "reminder")) {
+      j++;
+      // Skip optional "to" / "for" / "about"
+      if (j < tl.count &&
+          (prv_eq(tl.tokens[j], "to") || prv_eq(tl.tokens[j], "for") ||
+           prv_eq(tl.tokens[j], "about"))) {
+        j++;
+      }
+      return prv_match_reminder(manager, &tl, j);
+    }
+
+    // B1: scan up to 2 adjective/label tokens before "timer"/"alarm"
+    bool is_timer = false;
+    bool found_type = false;
+    int name_start = j;
+    int name_end = j;
+
+    for (int scan = 0; scan <= 2 && j < tl.count; ++scan) {
+      if (prv_is_timer_word(tl.tokens[j])) {
+        is_timer = true;
+        found_type = true;
+        name_end = j;
+        j++;
+        break;
+      }
+      if (prv_is_alarm_word(tl.tokens[j])) {
+        is_timer = false;
+        found_type = true;
+        name_end = j;
+        j++;
+        break;
+      }
+      if (scan < 2) {
+        j++;
+      }
+    }
+    if (!found_type) {
       return false;
     }
-    j++;
+
+    // Build name from adjective tokens (e.g. "baking" from "set a baking timer")
+    char name_buf[REMINDER_TEXT_SIZE] = {0};
+    if (name_end > name_start) {
+      prv_build_name(&tl, name_start, name_end, name_buf, REMINDER_TEXT_SIZE);
+    }
+    const char *name = (name_buf[0] != '\0') ? name_buf : NULL;
+
     // Optional "for" / "at".
-    if (j < tl.count && (prv_eq(tl.tokens[j], "for") || prv_eq(tl.tokens[j], "at"))) {
+    if (j < tl.count && (prv_eq(tl.tokens[j], "for") || prv_eq(tl.tokens[j], "at") ||
+                         prv_eq(tl.tokens[j], "in"))) {
       j++;
     }
     if (j >= tl.count) {
@@ -519,13 +733,12 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
     if (is_timer) {
       int idx = j;
       int seconds = prv_parse_duration(&tl, &idx);
-      // Must consume the rest of the utterance (modulo a trailing "please").
       int tail = prv_skip_pleasantries(&tl, idx);
       if (seconds < 0 || tail != tl.count) {
         return false;
       }
       time_t when = time(NULL) + seconds;
-      int result = alarm_manager_add_alarm(when, true, NULL, true);
+      int result = alarm_manager_add_alarm(when, true, name, true);
       if (result != 0) {
         conversation_manager_add_response(manager, "Sorry, I couldn't set that timer.");
         return true;
@@ -548,24 +761,160 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         return false;
       }
       time_t when = prv_next_occurrence(&ct);
-      int result = alarm_manager_add_alarm(when, false, NULL, true);
+      int result = alarm_manager_add_alarm(when, false, name, true);
       if (result != 0) {
         conversation_manager_add_response(manager, "Sorry, I couldn't set that alarm.");
         return true;
       }
-      struct tm lt = *localtime(&when);
       char timestr[16];
-      strftime(timestr, sizeof(timestr), "%l:%M %p", &lt);
-      // %l pads with a space; trim it.
-      char *ts = timestr;
-      while (*ts == ' ') {
-        ts++;
-      }
+      prv_format_clock(when, timestr, sizeof(timestr));
       char msg[64];
-      snprintf(msg, sizeof(msg), "Alarm set for %s.", ts);
+      snprintf(msg, sizeof(msg), "Alarm set for %s.", timestr);
       conversation_manager_add_response(manager, msg);
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline alarm for %d.", (int)when);
       return true;
+    }
+  }
+
+  // --- C2: "remind me ..." -------------------------------------------------
+  if (prv_eq(tl.tokens[i], "remind")) {
+    int j = i + 1;
+    if (j >= tl.count) return false;
+    if (!prv_eq(tl.tokens[j], "me")) return false;
+    j++;
+    return prv_match_reminder(manager, &tl, j);
+  }
+
+  // --- B2: List / query timers & alarms ------------------------------------
+  // Trigger words: list, show, tell + query content; or what/how/do/are + ...
+  {
+    bool is_query = (prv_eq(tl.tokens[i], "list") || prv_eq(tl.tokens[i], "show") ||
+                     prv_eq(tl.tokens[i], "what") || prv_eq(tl.tokens[i], "what's") ||
+                     prv_eq(tl.tokens[i], "whats") || prv_eq(tl.tokens[i], "how") ||
+                     prv_eq(tl.tokens[i], "do") || prv_eq(tl.tokens[i], "are") ||
+                     prv_eq(tl.tokens[i], "tell"));
+    if (is_query) {
+      // Look for "timer(s)" or "alarm(s)" anywhere in the remaining tokens
+      bool found_timer = prv_contains_token(&tl, i + 1, "timer") ||
+                         prv_contains_token(&tl, i + 1, "timers");
+      bool found_alarm = prv_contains_token(&tl, i + 1, "alarm") ||
+                         prv_contains_token(&tl, i + 1, "alarms");
+      // Must find exactly one type (timers or alarms)
+      if (found_timer != found_alarm) {
+        bool is_timer = found_timer;
+        int total = alarm_manager_get_alarm_count();
+        int count = 0;
+        int first_idx = -1;
+        for (int k = 0; k < total; ++k) {
+          Alarm *a = alarm_manager_get_alarm(k);
+          if (alarm_is_timer(a) == is_timer) {
+            if (first_idx < 0) first_idx = k;
+            count++;
+          }
+        }
+        char msg[128];
+        if (count == 0) {
+          snprintf(msg, sizeof(msg), "No %s set.", is_timer ? "timers" : "alarms");
+        } else {
+          Alarm *first = alarm_manager_get_alarm(first_idx);
+          char timestr[32];
+          if (is_timer) {
+            int remaining = (int)(alarm_get_time(first) - time(NULL));
+            if (remaining < 0) remaining = 0;
+            prv_format_duration(remaining, timestr, sizeof(timestr));
+          } else {
+            prv_format_clock(alarm_get_time(first), timestr, sizeof(timestr));
+          }
+          const char *name = alarm_get_name(first);
+          if (count == 1) {
+            if (name) {
+              snprintf(msg, sizeof(msg), "1 %s \"%s\" (%s%s).",
+                       is_timer ? "timer" : "alarm", name,
+                       is_timer ? "" : "at ", timestr);
+            } else {
+              snprintf(msg, sizeof(msg), "1 %s (%s%s).",
+                       is_timer ? "timer" : "alarm",
+                       is_timer ? "" : "at ", timestr);
+            }
+          } else {
+            if (name) {
+              snprintf(msg, sizeof(msg), "%d %s. Next: \"%s\" (%s%s).",
+                       count, is_timer ? "timers" : "alarms", name,
+                       is_timer ? "" : "at ", timestr);
+            } else {
+              snprintf(msg, sizeof(msg), "%d %s. Next: %s%s.",
+                       count, is_timer ? "timers" : "alarms",
+                       is_timer ? "" : "at ", timestr);
+            }
+          }
+        }
+        conversation_manager_add_response(manager, msg);
+        BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline list command.");
+        return true;
+      }
+    }
+  }
+
+  // --- B4: Time / date / battery -------------------------------------------
+  {
+    // Only match if the first token signals a query or is the keyword itself.
+    bool starts_query = (prv_eq(tl.tokens[i], "what") || prv_eq(tl.tokens[i], "what's") ||
+                         prv_eq(tl.tokens[i], "whats") || prv_eq(tl.tokens[i], "how") ||
+                         prv_eq(tl.tokens[i], "time") || prv_eq(tl.tokens[i], "date") ||
+                         prv_eq(tl.tokens[i], "day") || prv_eq(tl.tokens[i], "battery") ||
+                         prv_eq(tl.tokens[i], "tell") || prv_eq(tl.tokens[i], "check"));
+    if (starts_query) {
+      if (prv_contains_token(&tl, i, "battery")) {
+        BatteryChargeState state = battery_state_service_peek();
+        char msg[64];
+        if (state.is_charging) {
+          snprintf(msg, sizeof(msg), "Battery is at %d%% (charging).",
+                   state.charge_percent);
+        } else {
+          snprintf(msg, sizeof(msg), "Battery is at %d%%.", state.charge_percent);
+        }
+        conversation_manager_add_response(manager, msg);
+        BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline battery query.");
+        return true;
+      }
+      if (prv_contains_token(&tl, i, "date") || prv_contains_token(&tl, i, "day") ||
+          prv_contains_token(&tl, i, "today") || prv_contains_token(&tl, i, "month") ||
+          prv_contains_token(&tl, i, "year")) {
+        time_t now = time(NULL);
+        char datestr[48];
+        strftime(datestr, sizeof(datestr), "%A, %B %e %Y", localtime(&now));
+        // %e pads with a space for single-digit days; remove it.
+        for (char *p = datestr; *p; ++p) {
+          if (*p == ' ' && *(p+1) == ' ') {
+            memmove(p, p+1, strlen(p));
+          }
+        }
+        char msg[80];
+        snprintf(msg, sizeof(msg), "Today is %s.", datestr);
+        conversation_manager_add_response(manager, msg);
+        BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline date query.");
+        return true;
+      }
+      if (prv_contains_token(&tl, i, "time")) {
+        time_t now = time(NULL);
+        struct tm *lt = localtime(&now);
+        char timestr[16];
+        if (clock_is_24h_style()) {
+          strftime(timestr, sizeof(timestr), "%H:%M", lt);
+        } else {
+          strftime(timestr, sizeof(timestr), "%l:%M %p", lt);
+          // Trim leading space from %l
+          char *p = timestr;
+          while (*p == ' ') {
+            memmove(timestr, timestr + 1, sizeof(timestr) - 1);
+          }
+        }
+        char msg[48];
+        snprintf(msg, sizeof(msg), "It's %s.", timestr);
+        conversation_manager_add_response(manager, msg);
+        BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline time query.");
+        return true;
+      }
     }
   }
 

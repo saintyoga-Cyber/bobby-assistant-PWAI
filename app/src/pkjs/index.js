@@ -22,6 +22,7 @@ var clayConfig = require('./config.json');
 var customConfigFunction = require('./custom_config');
 var config = require('./config');
 var reminders = require('./reminders');
+var libReminders = require('./lib/reminders');
 var feedback = require('./lib/feedback');
 var package_json = require('package.json');
 
@@ -31,6 +32,7 @@ var clay = new Clay(clayConfig, customConfigFunction);
 function main() {
     doQuotaWarning();
     location.update();
+    libReminders.flushPendingPins();
     Pebble.addEventListener('appmessage', handleAppMessage);
 }
 

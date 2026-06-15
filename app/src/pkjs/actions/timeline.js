@@ -24,9 +24,16 @@ function timelineRequest(pin, type, topics, apiKey, callback) {
     // Create XHR
     var xhr = new XMLHttpRequest();
     xhr.onload = function () {
-        console.log('timeline: response received: ' + this.responseText);
+        var ok = this.status >= 200 && this.status < 300;
+        console.log('timeline: response: status=' + this.status + ' body=' + this.responseText);
         if (callback) {
-            callback(this.responseText);
+            callback(ok ? null : new Error('HTTP ' + this.status), this.responseText);
+        }
+    };
+    xhr.onerror = function () {
+        console.log('timeline: network error');
+        if (callback) {
+            callback(new Error('network error'), null);
         }
     };
     xhr.open(type, url);

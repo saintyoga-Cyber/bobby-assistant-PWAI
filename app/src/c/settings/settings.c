@@ -61,6 +61,14 @@ bool settings_get_should_confirm_transcripts() {
   return persist_read_bool(PERSIST_KEY_CONFIRM_TRANSCRIPTS);
 }
 
+bool settings_get_ai_enabled() {
+  // Default to true if the key was never written (new install).
+  if (!persist_exists(PERSIST_KEY_AI_ENABLED)) {
+    return true;
+  }
+  return persist_read_bool(PERSIST_KEY_AI_ENABLED);
+}
+
 static void prv_app_message_handler(DictionaryIterator *iter, void *context) {
   for (Tuple *tuple = dict_read_first(iter); tuple; tuple = dict_read_next(iter)) {
     if (tuple->key == MESSAGE_KEY_QUICK_LAUNCH_BEHAVIOUR) {
@@ -72,6 +80,8 @@ static void prv_app_message_handler(DictionaryIterator *iter, void *context) {
       persist_write_int(PERSIST_KEY_TIMER_VIBE_PATTERN, atoi(tuple->value->cstring));
     } else if (tuple->key == MESSAGE_KEY_CONFIRM_TRANSCRIPTS) {
       persist_write_bool(PERSIST_KEY_CONFIRM_TRANSCRIPTS, tuple->value->int8);
+    } else if (tuple->key == MESSAGE_KEY_AI_ENABLED) {
+      persist_write_bool(PERSIST_KEY_AI_ENABLED, tuple->value->int8);
     }
   }
 }
