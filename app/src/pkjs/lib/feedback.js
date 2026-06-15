@@ -19,7 +19,6 @@ var location = require('../location');
 var reminders = require('./reminders');
 var package_json = require('package.json');
 var urls = require('../urls');
-var session = require('../session');
 
 function constructFeedbackMetadata(request) {
     var appVersion = 'unknown'
@@ -71,8 +70,7 @@ function constructFeedbackMetadata(request) {
         'platform': platform,
         'watchFirmware': watchFirmware,
         'watchModel': model,
-        'watchPlatform': watchPlatform,
-        'timelineToken': session.userToken
+        'watchPlatform': watchPlatform
     };
 }
 
