@@ -266,6 +266,7 @@ static void prv_save_alarms() {
     persist_delete(PERSIST_KEY_ALARM_NAMES);
     persist_delete(PERSIST_KEY_ALARM_COUNT_TWO);
     wakeup_cancel_all();
+    return;
   }
   time_t times[MAX_ALARMS];
   WakeupId wakeup_ids[MAX_ALARMS];
@@ -424,7 +425,7 @@ static void prv_handle_get_alarm_request(int16_t is_timer, void* context) {
     if (alarm->is_timer == is_timer) {
       ++write_index;
       dict_write_int32(iter, MESSAGE_KEY_GET_ALARM_RESULT + write_index, alarm->scheduled_time);
-      dict_write_cstring(iter, MESSAGE_KEY_GET_ALARM_NAME + write_index, alarm->name);
+      dict_write_cstring(iter, MESSAGE_KEY_GET_ALARM_NAME + write_index, alarm->name ? alarm->name : "");
     }
   }
   dict_write_int16(iter, MESSAGE_KEY_GET_ALARM_RESULT, write_index);

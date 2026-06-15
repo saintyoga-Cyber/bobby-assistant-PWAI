@@ -23,6 +23,30 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Deferred reminder send — avoids calling app_message_outbox_begin from within
+// the conversation handler chain which can corrupt AppMessage outbox state.
+typedef struct {
+  time_t when;
+  char text[32];
+} PendingReminder;
+
+static PendingReminder s_pending_reminder;
+static bool s_has_pending_reminder = false;
+
+static void prv_deferred_reminder_send(void *context) {
+  if (!s_has_pending_reminder) return;
+  s_has_pending_reminder = false;
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Deferred reminder: outbox begin failed");
+    return;
+  }
+  dict_write_cstring(iter, MESSAGE_KEY_OFFLINE_REMINDER_TEXT, s_pending_reminder.text);
+  dict_write_int32(iter, MESSAGE_KEY_OFFLINE_REMINDER_TIME, (int32_t)s_pending_reminder.when);
+  app_message_outbox_send();
+  BOBBY_LOG(APP_LOG_LEVEL_INFO, "Deferred reminder sent to phone at %d", (int)s_pending_reminder.when);
+}
+
 // Tunable limits. Quick commands are short; anything longer is assumed to be
 // a real assistant query and falls through to the service.
 #define OC_MAX_INPUT 160
@@ -476,9 +500,8 @@ static void prv_build_name(const TokenList *tl, int start, int end,
 static void prv_format_clock(time_t when, char *buf, size_t buf_len) {
   struct tm lt = *localtime(&when);
   strftime(buf, buf_len, "%l:%M %p", &lt);
-  // %l pads with a leading space; remove it.
-  char *p = buf;
-  while (*p == ' ') {
+  // %l pads with a single leading space for single-digit hours; remove it.
+  if (buf[0] == ' ') {
     memmove(buf, buf + 1, buf_len - 1);
   }
 }
@@ -557,22 +580,20 @@ static bool prv_match_reminder(ConversationManager *manager,
 
   if (when == 0 || text_buf[0] == '\0') return false;
 
-  DictionaryIterator *iter;
-  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
-    conversation_manager_add_response(manager,
-        "Can't reach phone. Reminder not set.");
-    return true;
-  }
-  dict_write_cstring(iter, MESSAGE_KEY_OFFLINE_REMINDER_TEXT, text_buf);
-  dict_write_int32(iter, MESSAGE_KEY_OFFLINE_REMINDER_TIME, (int32_t)when);
-  app_message_outbox_send();
+  // Queue the AppMessage for deferred delivery so it fires after the
+  // conversation handler chain unwinds (avoids outbox state corruption).
+  s_pending_reminder.when = when;
+  strncpy(s_pending_reminder.text, text_buf, sizeof(s_pending_reminder.text) - 1);
+  s_pending_reminder.text[sizeof(s_pending_reminder.text) - 1] = '\0';
+  s_has_pending_reminder = true;
+  app_timer_register(100, prv_deferred_reminder_send, NULL);
 
   char timestr[16];
   prv_format_clock(when, timestr, sizeof(timestr));
   char msg[80];
   snprintf(msg, sizeof(msg), "Reminder for %s: %s.", timestr, text_buf);
   conversation_manager_add_response(manager, msg);
-  BOBBY_LOG(APP_LOG_LEVEL_INFO, "Forwarded reminder to phone at %d", (int)when);
+  BOBBY_LOG(APP_LOG_LEVEL_INFO, "Queued deferred reminder to phone at %d", (int)when);
   return true;
 }
 
@@ -725,7 +746,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         return false;
       }
       time_t when = time(NULL) + seconds;
-      int result = alarm_manager_add_alarm(when, true, name, true);
+      int result = alarm_manager_add_alarm(when, true, name, false);
       if (result != 0) {
         conversation_manager_add_response(manager, "Sorry, I couldn't set that timer.");
         return true;
@@ -748,7 +769,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         return false;
       }
       time_t when = prv_next_occurrence(&ct);
-      int result = alarm_manager_add_alarm(when, false, name, true);
+      int result = alarm_manager_add_alarm(when, false, name, false);
       if (result != 0) {
         conversation_manager_add_response(manager, "Sorry, I couldn't set that alarm.");
         return true;
