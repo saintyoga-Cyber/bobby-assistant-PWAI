@@ -23,7 +23,14 @@ var EXPIRED_REMINDER_TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 function loadReminders() {
   var stored = localStorage.getItem(REMINDERS_STORAGE_KEY);
-  return stored ? JSON.parse(stored) : [];
+  if (!stored) return [];
+  try {
+    return JSON.parse(stored);
+  } catch (e) {
+    console.error('Reminders localStorage corrupted, resetting:', e);
+    localStorage.removeItem(REMINDERS_STORAGE_KEY);
+    return [];
+  }
 }
 
 function saveReminders(reminders) {
@@ -76,8 +83,12 @@ function addReminder(text, time) {
     }]
   };
 
-  // Insert into timeline first - if this fails it will throw
-  timeline.insertUserPin(pin);
+  // Insert into Rebble timeline (best-effort; local storage is the source of truth).
+  timeline.insertUserPin(pin, function(err) {
+    if (err) {
+      console.error('Timeline pin insertion failed (will not appear in calendar):', err);
+    }
+  });
 
   // Store reminder locally
   var reminders = loadReminders();

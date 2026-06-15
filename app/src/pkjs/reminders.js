@@ -35,31 +35,30 @@ function handleReminderMessage(data) {
     });
 
     // First send the count
-    Pebble.sendAppMessage({
-      'REMINDER_COUNT': menuReminders.length
+    Pebble.sendAppMessage({'REMINDER_COUNT': menuReminders.length}, function() {
+      // On success start sending individual reminders
+      sendNextReminder(0);
+    }, function() {
+      console.error('Failed to send REMINDER_COUNT to watch');
     });
 
     // Then send each reminder
     function sendNextReminder(index) {
       if (index >= menuReminders.length) return;
-      
+
       var reminder = menuReminders[index];
       Pebble.sendAppMessage({
         'REMINDER_TEXT': reminder.text,
         'REMINDER_ID': reminder.id,
         'REMINDER_TIME': Math.floor(reminder.time.getTime() / 1000)
       }, function() {
-        // On success, send next reminder
         sendNextReminder(index + 1);
       }, function() {
-        // On failure, retry this reminder
-        console.error('Failed to send reminder:', reminder);
-        sendNextReminder(index);
+        // Skip on failure rather than retrying forever
+        console.error('Failed to send reminder ' + index + ', skipping');
+        sendNextReminder(index + 1);
       });
     }
-    
-    // Start sending reminders
-    sendNextReminder(0);
     return true;
   } else if (data.REMINDER_DELETE) {
     var id = data.REMINDER_DELETE;

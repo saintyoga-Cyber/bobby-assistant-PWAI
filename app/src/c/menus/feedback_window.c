@@ -178,7 +178,10 @@ static void prv_dictation_status_callback(DictationSession *session, DictationSe
   layer_add_child(window_get_root_layer(window), vector_sequence_layer_get_layer(data->loading_layer));
   vector_sequence_layer_play(data->loading_layer);
   DictionaryIterator *iter;
-  app_message_outbox_begin(&iter);
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "feedback_window: outbox begin failed");
+    return;
+  }
   strings_fix_android_bridge_bodge(transcription);
   dict_write_cstring(iter, MESSAGE_KEY_FEEDBACK_TEXT, transcription);
   VersionInfo version = version_get_current();

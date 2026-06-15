@@ -238,13 +238,24 @@ static void prv_handle_app_message_inbox_received(DictionaryIterator *iter, void
 static void prv_process_weather_widget(int widget_type, DictionaryIterator *iter, ConversationManager *manager) {
   switch (widget_type) {
     case 1: {
-      int high = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_HIGH)->value->int32;
-      int low = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_LOW)->value->int32;
-      int icon = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_ICON)->value->int32;
-      const char* summary = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_SUMMARY)->value->cstring;
-      const char* location = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_LOCATION)->value->cstring;
-      const char* temp_unit = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_TEMP_UNIT)->value->cstring;
-      const char* day = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_OF_WEEK)->value->cstring;
+      Tuple *t_high = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_HIGH);
+      Tuple *t_low = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_LOW);
+      Tuple *t_icon = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_ICON);
+      Tuple *t_summary = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_SUMMARY);
+      Tuple *t_location = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_LOCATION);
+      Tuple *t_temp_unit = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_TEMP_UNIT);
+      Tuple *t_day = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_OF_WEEK);
+      if (!t_high || !t_low || !t_icon || !t_summary || !t_location || !t_temp_unit || !t_day) {
+        BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Weather day widget missing required keys");
+        return;
+      }
+      int high = t_high->value->int32;
+      int low = t_low->value->int32;
+      int icon = t_icon->value->int32;
+      const char* summary = t_summary->value->cstring;
+      const char* location = t_location->value->cstring;
+      const char* temp_unit = t_temp_unit->value->cstring;
+      const char* day = t_day->value->cstring;
       char* summary_stored = bmalloc(strlen(summary) + 1);
       strcpy(summary_stored, summary);
       char* location_stored = bmalloc(strlen(location) + 1);
@@ -272,13 +283,24 @@ static void prv_process_weather_widget(int widget_type, DictionaryIterator *iter
       break;
     }
     case 2: {
-      int temp = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_CURRENT_TEMP)->value->int32;
-      int feels_like = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_FEELS_LIKE)->value->int32;
-      int icon = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_ICON)->value->int32;
-      int wind_speed = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_WIND_SPEED)->value->int32;
-      const char* location = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_LOCATION)->value->cstring;
-      const char* summary = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_SUMMARY)->value->cstring;
-      const char* wind_speed_unit = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_WIND_SPEED_UNIT)->value->cstring;
+      Tuple *t_temp = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_CURRENT_TEMP);
+      Tuple *t_feels = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_FEELS_LIKE);
+      Tuple *t_icon = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_ICON);
+      Tuple *t_wind = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_WIND_SPEED);
+      Tuple *t_location = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_LOCATION);
+      Tuple *t_summary = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_DAY_SUMMARY);
+      Tuple *t_wind_unit = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_WIND_SPEED_UNIT);
+      if (!t_temp || !t_feels || !t_icon || !t_wind || !t_location || !t_summary || !t_wind_unit) {
+        BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Weather current widget missing required keys");
+        return;
+      }
+      int temp = t_temp->value->int32;
+      int feels_like = t_feels->value->int32;
+      int icon = t_icon->value->int32;
+      int wind_speed = t_wind->value->int32;
+      const char* location = t_location->value->cstring;
+      const char* summary = t_summary->value->cstring;
+      const char* wind_speed_unit = t_wind_unit->value->cstring;
       char* location_stored = bmalloc(strlen(location) + 1);
       strcpy(location_stored, location);
       char* summary_stored = bmalloc(strlen(summary) + 1);
@@ -304,7 +326,12 @@ static void prv_process_weather_widget(int widget_type, DictionaryIterator *iter
       break;
     }
     case 3: {
-      const char* location = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_LOCATION)->value->cstring;
+      Tuple *t_location = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_LOCATION);
+      if (!t_location) {
+        BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Weather multi-day widget missing location");
+        return;
+      }
+      const char* location = t_location->value->cstring;
       char *location_stored = bmalloc(strlen(location) + 1);
       strcpy(location_stored, location);
       ConversationWidget widget = {
@@ -317,10 +344,18 @@ static void prv_process_weather_widget(int widget_type, DictionaryIterator *iter
       };
       for (int i = 0; i < 3; ++i) {
         ConversationWidgetWeatherMultiDaySegment *s = &widget.widget.weather_multi_day.days[i];
-        s->high = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_HIGH + i)->value->int32;
-        s->low = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_LOW + i)->value->int32;
-        s->condition = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_ICON + i)->value->int32;
-        const char* day = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_DAY + i)->value->cstring;
+        Tuple *t_high = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_HIGH + i);
+        Tuple *t_low  = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_LOW + i);
+        Tuple *t_icon = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_ICON + i);
+        Tuple *t_day  = dict_find(iter, MESSAGE_KEY_WEATHER_WIDGET_MULTI_DAY + i);
+        if (!t_high || !t_low || !t_icon || !t_day) {
+          BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Weather multi-day widget missing keys for day %d", i);
+          return;
+        }
+        s->high = t_high->value->int32;
+        s->low  = t_low->value->int32;
+        s->condition = t_icon->value->int32;
+        const char* day = t_day->value->cstring;
         strncpy(s->day, day, sizeof(s->day));
         s->day[sizeof(s->day) - 1] = '\0';
       }
@@ -332,7 +367,12 @@ static void prv_process_weather_widget(int widget_type, DictionaryIterator *iter
 }
 
 static void prv_process_timer_widget(int widget_type, DictionaryIterator *iter, ConversationManager *manager) {
-  time_t target_time = dict_find(iter, MESSAGE_KEY_TIMER_WIDGET_TARGET_TIME)->value->int32;
+  Tuple *t_target = dict_find(iter, MESSAGE_KEY_TIMER_WIDGET_TARGET_TIME);
+  if (!t_target) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Timer widget missing target time");
+    return;
+  }
+  time_t target_time = t_target->value->int32;
   char *name_stored = NULL;
   Tuple *tuple = dict_find(iter, MESSAGE_KEY_TIMER_WIDGET_NAME);
   if (tuple) {
@@ -357,7 +397,12 @@ static void prv_process_highlight_widget(int widget_type, DictionaryIterator *it
   if (widget_type != 1) {
     return;
   }
-  char *number = dict_find(iter, MESSAGE_KEY_HIGHLIGHT_WIDGET_PRIMARY)->value->cstring;
+  Tuple *t_number = dict_find(iter, MESSAGE_KEY_HIGHLIGHT_WIDGET_PRIMARY);
+  if (!t_number) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Highlight widget missing primary key");
+    return;
+  }
+  char *number = t_number->value->cstring;
   char *number_stored = bmalloc(strlen(number) + 1);
   strcpy(number_stored, number);
   char *units_stored = NULL;
@@ -385,8 +430,14 @@ static void prv_process_map_widget(int widget_type, DictionaryIterator *iter, Co
   if (widget_type != 1) {
     return;
   }
-  int image_id = dict_find(iter, MESSAGE_KEY_MAP_WIDGET_IMAGE_ID)->value->int32;
-  int user_location = dict_find(iter, MESSAGE_KEY_MAP_WIDGET_USER_LOCATION)->value->int32;
+  Tuple *t_image_id = dict_find(iter, MESSAGE_KEY_MAP_WIDGET_IMAGE_ID);
+  Tuple *t_user_loc = dict_find(iter, MESSAGE_KEY_MAP_WIDGET_USER_LOCATION);
+  if (!t_image_id || !t_user_loc) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Map widget missing required keys");
+    return;
+  }
+  int image_id = t_image_id->value->int32;
+  int user_location = t_user_loc->value->int32;
   ConversationWidget widget = {
     .type = ConversationWidgetTypeMap,
     .widget = {

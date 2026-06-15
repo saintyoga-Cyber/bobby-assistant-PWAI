@@ -88,7 +88,11 @@ function sendRequest(request, url, callback) {
                 callback(false, req.status);
             }
         }
-    }
+    };
+    req.onerror = function() {
+        console.log("Feedback request failed (network error)");
+        callback(false, 0);
+    };
     console.log("Feedback request: " + JSON.stringify(request));
     req.send(JSON.stringify(request));
 }

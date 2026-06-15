@@ -179,7 +179,10 @@ static void prv_window_unload(Window *window) {
 
 static void prv_fetch_reminders(Window *window) {
   DictionaryIterator *iter;
-  app_message_outbox_begin(&iter);
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "reminders_menu: outbox begin failed");
+    return;
+  }
   dict_write_uint8(iter, MESSAGE_KEY_REMINDER_LIST_REQUEST, 1);
   app_message_outbox_send();
 }

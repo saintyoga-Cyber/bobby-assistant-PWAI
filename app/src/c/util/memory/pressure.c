@@ -43,6 +43,10 @@ void memory_pressure_deinit() {
 
 void memory_pressure_register_callback(MemoryPressureHandler handler, int priority, void *context) {
   MemoryPressureCallbackEntry *entry = malloc(sizeof(MemoryPressureCallbackEntry));
+  if (!entry) {
+    BOBBY_LOG(APP_LOG_LEVEL_ERROR, "OOM: failed to register memory pressure callback");
+    return;
+  }
   entry->handler = handler;
   entry->priority = priority;
   entry->context = context;
