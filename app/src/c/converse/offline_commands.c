@@ -496,95 +496,7 @@ static bool prv_contains_token(const TokenList *tl, int from, const char *word) 
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// C2: Reminder matching helper
-// Called with j pointing to the token after "me" (or after "reminder" + opt
-// "to"/"for"). Attempts to parse "remind me [to] <text> at/in <time>" or
-// "remind me at/in <time> to <text>" forms.
-// Returns true and calls alarm_manager_add_reminder on success.
-// ---------------------------------------------------------------------------
-#define REMINDER_TEXT_SIZE 32
-
-static bool prv_match_reminder(ConversationManager *manager,
-                               const TokenList *tl, int j) {
-  // Skip optional "to" / "that" / "about"
-  if (j < tl->count &&
-      (prv_eq(tl->tokens[j], "to") || prv_eq(tl->tokens[j], "that") ||
-       prv_eq(tl->tokens[j], "about"))) {
-    j++;
-  }
-
-  time_t when = 0;
-  char text_buf[REMINDER_TEXT_SIZE] = {0};
-
-  // Check whether time preposition comes FIRST ("remind me at 5pm to buy milk")
-  if (j < tl->count &&
-      (prv_eq(tl->tokens[j], "at") || prv_eq(tl->tokens[j], "in"))) {
-    bool use_duration = prv_eq(tl->tokens[j], "in");
-    int k = j + 1;
-    if (use_duration) {
-      int secs = prv_parse_duration(tl, &k);
-      if (secs < 0) return false;
-      when = time(NULL) + secs;
-    } else {
-      ClockTime ct;
-      if (!prv_parse_clock(tl, &k, &ct)) return false;
-      when = prv_next_occurrence(&ct);
-    }
-    // Optional "to" / "that" before the text
-    if (k < tl->count &&
-        (prv_eq(tl->tokens[k], "to") || prv_eq(tl->tokens[k], "that"))) {
-      k++;
-    }
-    if (k >= tl->count) return false;
-    prv_build_name(tl, k, tl->count, text_buf, REMINDER_TEXT_SIZE);
-  } else {
-    // Text comes first: collect tokens until we hit "at"/"in" + parseable time.
-    int text_end = -1;
-    int text_start = j;
-
-    for (int k = text_start; k < tl->count; ++k) {
-      if (prv_eq(tl->tokens[k], "at") || prv_eq(tl->tokens[k], "in")) {
-        bool use_duration = prv_eq(tl->tokens[k], "in");
-        int try_idx = k + 1;
-        if (use_duration) {
-          int secs = prv_parse_duration(tl, &try_idx);
-          if (secs >= 0) {
-            when = time(NULL) + secs;
-            text_end = k;
-            break;
-          }
-        } else {
-          ClockTime ct;
-          if (prv_parse_clock(tl, &try_idx, &ct)) {
-            when = prv_next_occurrence(&ct);
-            text_end = k;
-            break;
-          }
-        }
-      }
-    }
-
-    if (text_end < 0 || when == 0) return false;
-    if (text_end <= text_start) return false;
-    prv_build_name(tl, text_start, text_end, text_buf, REMINDER_TEXT_SIZE);
-  }
-
-  if (when == 0 || text_buf[0] == '\0') return false;
-
-  int result = alarm_manager_add_reminder(when, text_buf);
-  if (result != 0) {
-    conversation_manager_add_response(manager, "Sorry, I couldn't set that reminder.");
-    return true;
-  }
-  char timestr[16];
-  prv_format_clock(when, timestr, sizeof(timestr));
-  char msg[80];
-  snprintf(msg, sizeof(msg), "Reminder set for %s: %s.", timestr, text_buf);
-  conversation_manager_add_response(manager, msg);
-  BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline reminder.");
-  return true;
-}
+#define NAME_BUF_SIZE 32
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -661,7 +573,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
     return true;
   }
 
-  // --- Set timer / alarm (B1 looser phrasing) / set reminder (C2) ----------
+  // --- Set timer / alarm (B1 looser phrasing) ------------------------------------
   if (prv_is_set_verb(tl.tokens[i])) {
     int j = i + 1;
     // Optional "me" as in "set me a timer".
@@ -671,18 +583,6 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
     j = prv_skip_article(&tl, j);
     if (j >= tl.count) {
       return false;
-    }
-
-    // C2 variant: "set a reminder ..."
-    if (prv_eq(tl.tokens[j], "reminder")) {
-      j++;
-      // Skip optional "to" / "for" / "about"
-      if (j < tl.count &&
-          (prv_eq(tl.tokens[j], "to") || prv_eq(tl.tokens[j], "for") ||
-           prv_eq(tl.tokens[j], "about"))) {
-        j++;
-      }
-      return prv_match_reminder(manager, &tl, j);
     }
 
     // B1: scan up to 2 adjective/label tokens before "timer"/"alarm"
@@ -715,9 +615,9 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
     }
 
     // Build name from adjective tokens (e.g. "baking" from "set a baking timer")
-    char name_buf[REMINDER_TEXT_SIZE] = {0};
+    char name_buf[NAME_BUF_SIZE] = {0};
     if (name_end > name_start) {
-      prv_build_name(&tl, name_start, name_end, name_buf, REMINDER_TEXT_SIZE);
+      prv_build_name(&tl, name_start, name_end, name_buf, NAME_BUF_SIZE);
     }
     const char *name = (name_buf[0] != '\0') ? name_buf : NULL;
 
@@ -774,15 +674,6 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline alarm for %d.", (int)when);
       return true;
     }
-  }
-
-  // --- C2: "remind me ..." -------------------------------------------------
-  if (prv_eq(tl.tokens[i], "remind")) {
-    int j = i + 1;
-    if (j >= tl.count) return false;
-    if (!prv_eq(tl.tokens[j], "me")) return false;
-    j++;
-    return prv_match_reminder(manager, &tl, j);
   }
 
   // --- B2: List / query timers & alarms ------------------------------------

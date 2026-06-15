@@ -29,8 +29,6 @@ int alarm_manager_cancel_alarm(time_t when, bool is_timer);
 // Returns true if one was found and cancelled. Used by the offline
 // quick-command path, where the exact scheduled time isn't known.
 bool alarm_manager_cancel_first(bool is_timer);
-int alarm_manager_add_reminder(time_t when, const char *text);
-void alarm_manager_sync_pending_reminders(void);
 int alarm_manager_get_alarm_count();
 Alarm* alarm_manager_get_alarm(int index);
 bool alarm_manager_maybe_alarm();

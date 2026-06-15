@@ -17,15 +17,6 @@
 var reminders = require('./lib/reminders');
 
 function handleReminderMessage(data) {
-  if (data.SYNC_REMINDER_PIN_ID && data.SYNC_REMINDER_PIN_TIME && data.SYNC_REMINDER_PIN_TEXT) {
-    console.log('Handling reminder pin sync request: ' + data.SYNC_REMINDER_PIN_ID);
-    reminders.addReminderFromWatch(
-      data.SYNC_REMINDER_PIN_ID,
-      data.SYNC_REMINDER_PIN_TIME,
-      data.SYNC_REMINDER_PIN_TEXT
-    );
-    return true;
-  }
   if (data.REMINDER_LIST_REQUEST) {
     var allReminders = reminders.getAllReminders();
     

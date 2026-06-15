@@ -25,7 +25,6 @@
 
 #include <pebble-events/pebble-events.h>
 #include <pebble.h>
-#include "../settings/settings.h"
 
 
 struct ConversationManager {
@@ -110,41 +109,10 @@ void conversation_manager_add_input(ConversationManager* manager, const char* in
     return;
   }
 
-  if (!settings_get_ai_enabled()) {
-    conversation_add_error(manager->conversation, "AI is disabled in settings.");
-    prv_conversation_updated(manager, true);
-    return;
-  }
-
-  DictionaryIterator *iter;
-  AppMessageResult result = app_message_outbox_begin(&iter);
-  if (result != APP_MSG_OK) {
-    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Preparing outbox failed: %d.", result);
-    conversation_add_error(manager->conversation, "Sending to service failed.");
-    prv_conversation_updated(manager, true);
-    return;
-  }
-
-  // The Android Pebble app has a fun bug where any double-quotes in a
-  // message will cause it to be dropped, this is a bodge workaround.
-  char* bridge_bodge = bmalloc(strlen(input) + 1);
-  strcpy(bridge_bodge, input);
-  strings_fix_android_bridge_bodge(bridge_bodge);
-  dict_write_cstring(iter, MESSAGE_KEY_PROMPT, bridge_bodge);
-  free(bridge_bodge);
-
-  const char* thread_id = conversation_get_thread_id(manager->conversation);
-  if (thread_id[0] != 0) {
-    BOBBY_LOG(APP_LOG_LEVEL_INFO, "Continuing previous conversation %s.", thread_id);
-    dict_write_cstring(iter, MESSAGE_KEY_THREAD_ID, thread_id);
-  }
-  result = app_message_outbox_send();
-  if (result != APP_MSG_OK) {
-    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Sending message failed: %d.", result);
-    conversation_add_error(manager->conversation, "Sending to service failed.");
-    prv_conversation_updated(manager, true);
-    return;
-  }
+  conversation_add_error(manager->conversation,
+      "Bobby works offline. Try: set timer, set alarm, list timers, "
+      "cancel alarm, time, date, or battery.");
+  prv_conversation_updated(manager, true);
 }
 
 void conversation_manager_add_response(ConversationManager* manager, const char* text) {
