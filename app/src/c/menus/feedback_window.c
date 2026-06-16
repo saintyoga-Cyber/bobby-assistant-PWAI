@@ -179,7 +179,7 @@ static void prv_dictation_status_callback(DictationSession *session, DictationSe
   vector_sequence_layer_play(data->loading_layer);
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
-    BOBBY_LOG(APP_LOG_LEVEL_WARNING, "feedback_window: outbox begin failed");
+    APP_LOG(APP_LOG_LEVEL_WARNING, "feedback_window: outbox begin failed");
     return;
   }
   strings_fix_android_bridge_bodge(transcription);
