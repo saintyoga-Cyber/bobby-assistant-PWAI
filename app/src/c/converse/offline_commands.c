@@ -599,7 +599,9 @@ static bool prv_match_reminder(char *result_buf, size_t result_size,
 // Main entry point
 // ---------------------------------------------------------------------------
 
-bool offline_commands_try(const char *input, char *result_buf, size_t result_size) {
+bool offline_commands_try(const char *input, char *result_buf, size_t result_size,
+                          OfflineCommandType *out_type) {
+  if (out_type) *out_type = OC_NONE;
   TokenList tl;
   if (!prv_tokenize(input, &tl)) {
     return false;
@@ -646,6 +648,7 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
       }
       snprintf(result_buf, result_size, "%s", msg);
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline cancel-all.");
+      if (out_type) *out_type = is_timer ? OC_TYPE_TIMER : OC_TYPE_ALARM;
       return true;
     }
 
@@ -667,6 +670,7 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
                         : "You have no alarm to cancel.");
     }
     BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline cancel command.");
+    if (out_type) *out_type = is_timer ? OC_TYPE_TIMER : OC_TYPE_ALARM;
     return true;
   }
 
@@ -685,7 +689,11 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
            prv_eq(tl.tokens[j], "about"))) {
         j++;
       }
-      return prv_match_reminder(result_buf, result_size, &tl, j);
+      if (prv_match_reminder(result_buf, result_size, &tl, j)) {
+        if (out_type) *out_type = OC_TYPE_REMINDER;
+        return true;
+      }
+      return false;
     }
     if (j >= tl.count) {
       return false;
@@ -747,12 +755,14 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
       int result = alarm_manager_add_alarm(when, true, name);
       if (result != 0) {
         snprintf(result_buf, result_size, "%s", "Sorry, I couldn't set that timer.");
+        if (out_type) *out_type = OC_TYPE_TIMER;
         return true;
       }
       char dur[48];
       prv_format_duration(seconds, dur, sizeof(dur));
       snprintf(result_buf, result_size, "Timer set for %s.", dur);
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline timer for %d seconds.", seconds);
+      if (out_type) *out_type = OC_TYPE_TIMER;
       return true;
     } else {
       ClockTime ct;
@@ -768,12 +778,14 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
       int result = alarm_manager_add_alarm(when, false, name);
       if (result != 0) {
         snprintf(result_buf, result_size, "%s", "Sorry, I couldn't set that alarm.");
+        if (out_type) *out_type = OC_TYPE_ALARM;
         return true;
       }
       char timestr[16];
       prv_format_clock(when, timestr, sizeof(timestr));
       snprintf(result_buf, result_size, "Alarm set for %s.", timestr);
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline alarm for %d.", (int)when);
+      if (out_type) *out_type = OC_TYPE_ALARM;
       return true;
     }
   }
@@ -783,7 +795,11 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
     int j = i + 1;
     if (j >= tl.count || !prv_eq(tl.tokens[j], "me")) return false;
     j++;
-    return prv_match_reminder(result_buf, result_size, &tl, j);
+    if (prv_match_reminder(result_buf, result_size, &tl, j)) {
+      if (out_type) *out_type = OC_TYPE_REMINDER;
+      return true;
+    }
+    return false;
   }
 
   // --- B2: List / query timers & alarms ------------------------------------
@@ -851,6 +867,7 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
         }
         snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline list command.");
+        if (out_type) *out_type = is_timer ? OC_TYPE_TIMER : OC_TYPE_ALARM;
         return true;
       }
     }
@@ -876,6 +893,7 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
         }
         snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline battery query.");
+        if (out_type) *out_type = OC_TYPE_INFO;
         return true;
       }
       if (prv_contains_token(&tl, i, "date") || prv_contains_token(&tl, i, "day") ||
@@ -894,6 +912,7 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
         snprintf(msg, sizeof(msg), "Today is %s.", datestr);
         snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline date query.");
+        if (out_type) *out_type = OC_TYPE_INFO;
         return true;
       }
       if (prv_contains_token(&tl, i, "time")) {
@@ -914,6 +933,7 @@ bool offline_commands_try(const char *input, char *result_buf, size_t result_siz
         snprintf(msg, sizeof(msg), "It's %s.", timestr);
         snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline time query.");
+        if (out_type) *out_type = OC_TYPE_INFO;
         return true;
       }
     }

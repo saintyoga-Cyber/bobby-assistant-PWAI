@@ -99,6 +99,21 @@
           "targetPlatforms": [
             "emery"
           ]
+        },
+        {
+          "file": "icons/menu_timers_bw.png",
+          "name": "ICON_TIMER",
+          "type": "bitmap"
+        },
+        {
+          "file": "icons/menu_reminders_bw.png",
+          "name": "ICON_REMINDER",
+          "type": "bitmap"
+        },
+        {
+          "file": "icons/dictation_icon.png",
+          "name": "ICON_NOTE",
+          "type": "bitmap"
         }
       ]
     }

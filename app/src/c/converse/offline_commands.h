@@ -20,11 +20,21 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+typedef enum {
+  OC_NONE     = 0,
+  OC_TYPE_TIMER,
+  OC_TYPE_ALARM,
+  OC_TYPE_REMINDER,
+  OC_TYPE_INFO,
+} OfflineCommandType;
+
 // Attempts to handle a transcribed prompt entirely on the watch (timers,
 // alarms, reminders, time/date/battery queries), with no round trip to the
 // service.  Returns true and writes a human-readable response into result_buf
 // if the input was a recognised command; returns false if the caller should
-// fall through (e.g. save as a note).
-bool offline_commands_try(const char *input, char *result_buf, size_t result_size);
+// fall through (e.g. save as a note).  *out_type is set to the matched command
+// category (or OC_NONE on no match); pass NULL to ignore.
+bool offline_commands_try(const char *input, char *result_buf, size_t result_size,
+                          OfflineCommandType *out_type);
 
 #endif

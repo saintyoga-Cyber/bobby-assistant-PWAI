@@ -146,9 +146,16 @@ static void prv_dictation_callback(DictationSession *session,
   char result[RESULT_BUF_SIZE];
   result[0] = '\0';
 
-  if (offline_commands_try(transcription, result, sizeof(result))) {
+  OfflineCommandType oc_type;
+  if (offline_commands_try(transcription, result, sizeof(result), &oc_type)) {
+    uint32_t icon = 0;
+    if (oc_type == OC_TYPE_TIMER || oc_type == OC_TYPE_ALARM) {
+      icon = RESOURCE_ID_ICON_TIMER;
+    } else if (oc_type == OC_TYPE_REMINDER) {
+      icon = RESOURCE_ID_ICON_REMINDER;
+    }
     vibe_haptic_feedback();
-    result_window_push("PWAI", result);
+    result_window_push("PWAI", result, icon);
     window_stack_remove(vw->window, false);
     return;
   }
@@ -156,13 +163,13 @@ static void prv_dictation_callback(DictationSession *session,
   // Not an offline command — send to phone as a note.
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
-    result_window_push("PWAI", "Couldn't save note");
+    result_window_push("PWAI", "Couldn't save note", RESOURCE_ID_ICON_NOTE);
     window_stack_remove(vw->window, false);
     return;
   }
   dict_write_cstring(iter, MESSAGE_KEY_NOTE_TEXT, transcription);
   if (app_message_outbox_send() != APP_MSG_OK) {
-    result_window_push("PWAI", "Couldn't save note");
+    result_window_push("PWAI", "Couldn't save note", RESOURCE_ID_ICON_NOTE);
     window_stack_remove(vw->window, false);
     return;
   }
@@ -181,7 +188,7 @@ static void prv_app_message_received(DictionaryIterator *iter, void *context) {
   }
   bool ok = (t->value->int8 != 0);
   vw->waiting_for_phone = false;
-  result_window_push("PWAI", ok ? "Note saved" : "Couldn't save note");
+  result_window_push("PWAI", ok ? "Note saved" : "Couldn't save note", RESOURCE_ID_ICON_NOTE);
   window_stack_remove(vw->window, false);
 }
 

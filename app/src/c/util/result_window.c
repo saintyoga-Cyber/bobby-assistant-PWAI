@@ -26,6 +26,9 @@ typedef struct {
   TextLayer *title_layer;
   TextLayer *text_layer;
   StatusBarLayer *status_bar;
+  GBitmap *icon_bitmap;
+  BitmapLayer *icon_layer;
+  uint32_t icon_resource_id;
   char *title_text;
   char *text_text;
   AppTimer *timer;
@@ -36,10 +39,11 @@ static void prv_window_unload(Window *window);
 static void prv_window_appear(Window *window);
 static void prv_timer_expired(void *context);
 
-void result_window_push(const char *title, const char *text) {
+void result_window_push(const char *title, const char *text, uint32_t icon_resource_id) {
   Window *window = bwindow_create();
   ResultWindowData *data = bmalloc(sizeof(ResultWindowData));
   memset(data, 0, sizeof(ResultWindowData));
+  data->icon_resource_id = icon_resource_id;
   data->title_text = bmalloc(strlen(title) + 1);
   strncpy(data->title_text, title, strlen(title) + 1);
   data->text_text = bmalloc(strlen(text) + 1);
@@ -63,10 +67,23 @@ static void prv_window_load(Window *window) {
   int16_t side = PBL_IF_ROUND_ELSE(30, 4);
   int16_t text_w = bounds.size.w - side * 2;
 
+  // Load icon bitmap if specified.
+  int16_t icon_h = 0;
+  int16_t icon_w = 0;
+  if (data->icon_resource_id) {
+    data->icon_bitmap = bgbitmap_create_with_resource(data->icon_resource_id);
+    if (data->icon_bitmap) {
+      GSize sz = gbitmap_get_bounds(data->icon_bitmap).size;
+      icon_h = sz.h;
+      icon_w = sz.w;
+    }
+  }
+
   int16_t content_y;
 #if defined(PBL_ROUND)
-  // No status bar on round — use full height and vertically centre the block.
-  int16_t block_h = (int16_t)(fonts->title_font_cap + 8 + fonts->text_font_cap * 2 + 4);
+  int16_t icon_block = icon_h > 0 ? icon_h + 6 : 0;
+  int16_t block_h = (int16_t)(icon_block + fonts->title_font_cap + 8 +
+                               fonts->text_font_cap * 2 + 4);
   content_y = (int16_t)((bounds.size.h - block_h) / 2);
   if (content_y < 4) content_y = 4;
 #else
@@ -75,6 +92,16 @@ static void prv_window_load(Window *window) {
   layer_add_child(root, status_bar_layer_get_layer(data->status_bar));
   content_y = STATUS_BAR_LAYER_HEIGHT + 8;
 #endif
+
+  if (data->icon_bitmap) {
+    int16_t icon_x = (bounds.size.w - icon_w) / 2;
+    data->icon_layer = bbitmap_layer_create(GRect(icon_x, content_y, icon_w, icon_h));
+    bitmap_layer_set_bitmap(data->icon_layer, data->icon_bitmap);
+    bitmap_layer_set_alignment(data->icon_layer, GAlignCenter);
+    bitmap_layer_set_compositing_mode(data->icon_layer, GCompOpSet);
+    layer_add_child(root, bitmap_layer_get_layer(data->icon_layer));
+    content_y += icon_h + 6;
+  }
 
   data->title_layer = btext_layer_create(
       GRect(side, content_y, text_w, fonts->title_font_cap + 4));
@@ -98,6 +125,12 @@ static void prv_window_unload(Window *window) {
   ResultWindowData *data = window_get_user_data(window);
   if (data->timer) {
     app_timer_cancel(data->timer);
+  }
+  if (data->icon_layer) {
+    bitmap_layer_destroy(data->icon_layer);
+  }
+  if (data->icon_bitmap) {
+    gbitmap_destroy(data->icon_bitmap);
   }
   text_layer_destroy(data->title_layer);
   text_layer_destroy(data->text_layer);

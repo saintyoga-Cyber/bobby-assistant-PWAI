@@ -17,8 +17,10 @@
 #ifndef RESULT_WINDOW_H
 #define RESULT_WINDOW_H
 
-// Push a transient result window showing title and body text.
-// Auto-dismisses after 4 seconds; back button also closes it.
-void result_window_push(const char *title, const char *text);
+#include <pebble.h>
+
+// Push a transient result window showing title, body text, and an optional
+// icon (pass 0 for no icon).  Auto-dismisses after 4 seconds.
+void result_window_push(const char *title, const char *text, uint32_t icon_resource_id);
 
 #endif

@@ -226,10 +226,10 @@ static void prv_handle_snooze(ClickRecognizerRef recognizer, void *context) {
   }
   if (result == S_SUCCESS) {
     const char *text = data->is_timer ? "Snoozed for 1 minute" : "Snoozed for 10 minutes";
-    result_window_push("Snoozed", text);
+    result_window_push("Snoozed", text, 0);
   } else {
     const char *text = data->is_timer ? "Failed to snooze. Timer dismissed." : "Failed to snooze. Alarm dismissed.";
-    result_window_push("Failed", text);
+    result_window_push("Failed", text, 0);
   }
   window_stack_remove(window, false);
 }
