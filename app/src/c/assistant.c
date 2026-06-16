@@ -25,6 +25,10 @@
 static void prv_init(void) {
   memory_pressure_init();
   fonts_load();
+  // Must request buffer sizes before opening AppMessage, otherwise the
+  // default buffers are too small for note/alarm/reminder payloads.
+  events_app_message_request_inbox_size(1024);
+  events_app_message_request_outbox_size(1024);
   events_app_message_open();
   alarm_manager_init();
 }

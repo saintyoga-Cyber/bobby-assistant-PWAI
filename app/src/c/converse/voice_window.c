@@ -35,9 +35,8 @@ typedef struct {
   TextLayer *status_layer;
   EventHandle app_message_handle;
   bool waiting_for_phone;
+  bool dictation_pending;
 } VoiceWindow;
-
-static VoiceWindow *s_vw = NULL;
 
 static void prv_start_dictation(VoiceWindow *vw);
 static void prv_dictation_callback(DictationSession *session,
@@ -56,7 +55,6 @@ void voice_window_push(void) {
   VoiceWindow *vw = bmalloc(sizeof(VoiceWindow));
   memset(vw, 0, sizeof(VoiceWindow));
   vw->window = window;
-  s_vw = vw;
   window_set_user_data(window, vw);
   window_set_background_color(window, BRANDED_BACKGROUND_COLOUR);
   window_set_window_handlers(window, (WindowHandlers){
@@ -89,14 +87,21 @@ static void prv_window_load(Window *window) {
   vw->app_message_handle = events_app_message_register_inbox_received(
       prv_app_message_received, vw);
 
+  // Auto-start dictation exactly once, when the window first appears.
+  // Subsequent appears (e.g. when the dictation modal closes) must NOT
+  // restart it, or we'd loop forever on the mic screen. Re-dictation
+  // after that happens only via the SELECT button.
+  vw->dictation_pending = true;
+
   window_set_click_config_provider_with_context(window, prv_click_config_provider, vw);
 }
 
 static void prv_window_appear(Window *window) {
   VoiceWindow *vw = window_get_user_data(window);
-  // Release dictation memory budget.
-  free(bmalloc(2048));
-  prv_start_dictation(vw);
+  if (vw->dictation_pending) {
+    vw->dictation_pending = false;
+    prv_start_dictation(vw);
+  }
 }
 
 static void prv_window_unload(Window *window) {
@@ -106,12 +111,13 @@ static void prv_window_unload(Window *window) {
   text_layer_destroy(vw->status_layer);
   free(vw);
   window_destroy(window);
-  s_vw = NULL;
 }
 
 static void prv_start_dictation(VoiceWindow *vw) {
   vw->waiting_for_phone = false;
   prv_set_status(vw, "Listening…");
+  // Dictation needs a large transient allocation; nudge the heap first.
+  free(bmalloc(2048));
   dictation_session_start(vw->dictation);
 }
 
