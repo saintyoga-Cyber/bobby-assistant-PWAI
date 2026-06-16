@@ -125,12 +125,11 @@ static void prv_dictation_callback(DictationSession *session,
   VoiceWindow *vw = context;
 
   if (status != DictationSessionStatusSuccess) {
-    if (status == DictationSessionStatusFailureTranscriptionRejected ||
-        status == DictationSessionStatusFailureTranscriptionRejectedEmpty) {
-      // User cancelled — just exit.
+    if (status == DictationSessionStatusFailureTranscriptionRejected) {
+      // User backed out of the dictation UI — exit the app.
       window_stack_pop(true);
     } else {
-      // Mic / network error — offer retry via SELECT.
+      // Mic / network / no-speech error — offer retry via SELECT.
       prv_set_status(vw, "Tap to retry");
     }
     return;

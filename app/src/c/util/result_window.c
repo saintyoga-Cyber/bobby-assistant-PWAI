@@ -65,7 +65,6 @@ static void prv_window_load(Window *window) {
   layer_add_child(root, status_bar_layer_get_layer(data->status_bar));
 
   int16_t content_y = STATUS_BAR_LAYER_HEIGHT + 8;
-  int16_t content_h = bounds.size.h - content_y - 8;
 
   data->title_layer = btext_layer_create(
       GRect(4, content_y, bounds.size.w - 8, fonts->title_font_cap + 4));
