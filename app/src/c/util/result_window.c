@@ -60,26 +60,36 @@ static void prv_window_load(Window *window) {
   GRect bounds = layer_get_bounds(root);
   const FontsConfig *fonts = fonts_get_config();
 
+  int16_t side = PBL_IF_ROUND_ELSE(30, 4);
+  int16_t text_w = bounds.size.w - side * 2;
+
+  int16_t content_y;
+#if defined(PBL_ROUND)
+  // No status bar on round — use full height and vertically centre the block.
+  int16_t block_h = (int16_t)(fonts->title_font_cap + 8 + fonts->content_font_cap * 2 + 4);
+  content_y = (int16_t)((bounds.size.h - block_h) / 2);
+  if (content_y < 4) content_y = 4;
+#else
   data->status_bar = bstatus_bar_layer_create();
   bobby_status_bar_result_pane_config(data->status_bar);
   layer_add_child(root, status_bar_layer_get_layer(data->status_bar));
-
-  int16_t content_y = STATUS_BAR_LAYER_HEIGHT + 8;
+  content_y = STATUS_BAR_LAYER_HEIGHT + 8;
+#endif
 
   data->title_layer = btext_layer_create(
-      GRect(4, content_y, bounds.size.w - 8, fonts->title_font_cap + 4));
+      GRect(side, content_y, text_w, fonts->title_font_cap + 4));
   text_layer_set_background_color(data->title_layer, GColorClear);
   text_layer_set_font(data->title_layer, fonts->title_font);
-  text_layer_set_text_alignment(data->title_layer, GTextAlignmentLeft);
+  text_layer_set_text_alignment(data->title_layer, GTextAlignmentCenter);
   text_layer_set_text(data->title_layer, data->title_text);
   layer_add_child(root, text_layer_get_layer(data->title_layer));
 
   int16_t text_y = content_y + fonts->title_font_cap + 8;
   data->text_layer = btext_layer_create(
-      GRect(4, text_y, bounds.size.w - 8, bounds.size.h - text_y - 4));
+      GRect(side, text_y, text_w, bounds.size.h - text_y - side / 2));
   text_layer_set_background_color(data->text_layer, GColorClear);
-  text_layer_set_font(data->text_layer, fonts->text_font);
-  text_layer_set_text_alignment(data->text_layer, GTextAlignmentLeft);
+  text_layer_set_font(data->text_layer, fonts->content_font);
+  text_layer_set_text_alignment(data->text_layer, GTextAlignmentCenter);
   text_layer_set_text(data->text_layer, data->text_text);
   layer_add_child(root, text_layer_get_layer(data->text_layer));
 }
@@ -91,7 +101,9 @@ static void prv_window_unload(Window *window) {
   }
   text_layer_destroy(data->title_layer);
   text_layer_destroy(data->text_layer);
-  status_bar_layer_destroy(data->status_bar);
+  if (data->status_bar) {
+    status_bar_layer_destroy(data->status_bar);
+  }
   free(data->title_text);
   free(data->text_text);
   free(data);
