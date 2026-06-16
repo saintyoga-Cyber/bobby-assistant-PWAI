@@ -66,7 +66,7 @@ static void prv_window_load(Window *window) {
   int16_t content_y;
 #if defined(PBL_ROUND)
   // No status bar on round — use full height and vertically centre the block.
-  int16_t block_h = (int16_t)(fonts->title_font_cap + 8 + fonts->content_font_cap * 2 + 4);
+  int16_t block_h = (int16_t)(fonts->title_font_cap + 8 + fonts->text_font_cap * 2 + 4);
   content_y = (int16_t)((bounds.size.h - block_h) / 2);
   if (content_y < 4) content_y = 4;
 #else
@@ -88,7 +88,7 @@ static void prv_window_load(Window *window) {
   data->text_layer = btext_layer_create(
       GRect(side, text_y, text_w, bounds.size.h - text_y - side / 2));
   text_layer_set_background_color(data->text_layer, GColorClear);
-  text_layer_set_font(data->text_layer, fonts->content_font);
+  text_layer_set_font(data->text_layer, fonts->text_font);
   text_layer_set_text_alignment(data->text_layer, GTextAlignmentCenter);
   text_layer_set_text(data->text_layer, data->text_text);
   layer_add_child(root, text_layer_get_layer(data->text_layer));
