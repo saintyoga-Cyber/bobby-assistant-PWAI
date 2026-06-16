@@ -17,8 +17,8 @@
 #ifndef RESULT_WINDOW_H
 #define RESULT_WINDOW_H
 
-#include <pebble.h>
+// Push a transient result window showing title and body text.
+// Auto-dismisses after 4 seconds; back button also closes it.
+void result_window_push(const char *title, const char *text);
 
-void result_window_push(const char* title, const char* text, GDrawCommandImage *image, GColor background_color);
-
-#endif //RESULT_WINDOW_H
+#endif

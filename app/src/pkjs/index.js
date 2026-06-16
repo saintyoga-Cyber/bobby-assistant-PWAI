@@ -14,70 +14,29 @@
  * limitations under the License.
  */
 
-var location = require('./location');
-var Clay = require('@rebble/clay');
-var clayConfig = require('./config.json');
-var customConfigFunction = require('./custom_config');
-var config = require('./config');
 var reminders = require('./reminders');
-var feedback = require('./lib/feedback');
-var package_json = require('package.json');
+var notes = require('./notes');
 
+Pebble.addEventListener('ready', function() {
+  console.log('PWAI ready');
+});
 
-var clay = new Clay(clayConfig, customConfigFunction);
+Pebble.addEventListener('appmessage', function(e) {
+  var data = e.payload;
 
-function main() {
-    location.update();
-    Pebble.addEventListener('appmessage', handleAppMessage);
-}
+  // Reminder commands (set / list / delete)
+  if (reminders.handleReminderMessage(data)) {
+    return;
+  }
 
-function handleAppMessage(e) {
-    console.log("Inbound app message!");
-    console.log(JSON.stringify(e));
-    var data = e.payload;
-
-    if (reminders.handleReminderMessage(data)) {
-        return;
-    }
-
-    if ('LOCATION_ENABLED' in data) {
-        config.setSetting("LOCATION_ENABLED", !!data.LOCATION_ENABLED);
-        console.log("Location enabled: " + config.isLocationEnabled());
-        // We need to confirm that we received this for the watch to proceed.
-        Pebble.sendAppMessage({
-            LOCATION_ENABLED: data.LOCATION_ENABLED,
-        });
-    }
-    if ('FEEDBACK_TEXT' in data) {
-        console.log("Handling feedback...");
-        feedback.handleFeedbackRequest(data);
-    }
-    if ('REPORT_THREAD_UUID' in data) {
-        console.log("Handling report...");
-        feedback.handleReportRequest(data);
-    }
-}
-
-function doCobbleWarning() {
-    if (window.cobble) {
-        console.log("WARNING: Running Bobby on Cobble is not supported, and has multiple known issues.");
-        Pebble.sendAppMessage({COBBLE_WARNING: 1});
-    }
-}
-
-Pebble.addEventListener("ready",
-    function(e) {
-        // This happens before anything else because I don't trust Cobble to get through the normal flow,
-        // given how many things bizarrely don't work.
-        doCobbleWarning();
-        console.log("Bobby " + package_json['version']);
-        if (Pebble.platform === 'pypkjs') {
-            console.log("Entering emulator mode.");
-            var emulator_main = require('./emulator/emulator_main');
-            emulator_main.main();
-            return;
-        }
-        console.log("Entering real mode.");
-        main();
-    }
-);
+  // Save voice note as Rebble timeline pin
+  if (data.NOTE_TEXT) {
+    notes.saveNote(data.NOTE_TEXT, function(err) {
+      Pebble.sendAppMessage({ NOTE_SAVED: err ? 0 : 1 }, function() {
+        console.log('NOTE_SAVED ack sent');
+      }, function() {
+        console.error('NOTE_SAVED ack failed');
+      });
+    });
+  }
+});

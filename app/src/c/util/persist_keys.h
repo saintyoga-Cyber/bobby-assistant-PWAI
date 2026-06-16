@@ -17,35 +17,16 @@
 #ifndef APP_PERSIST_KEYS_H
 #define APP_PERSIST_KEYS_H
 
-// These keys are stored centrally so we can avoid accidental collisions.
-// Remember: these numbers can *never* be changed.
+// Centralised persist key registry.  Keys can NEVER be renumbered.
+
+// Alarm state (used by alarms/manager.c)
+#define PERSIST_KEY_ALARM_COUNT_ONE   1
+#define PERSIST_KEY_ALARM_COUNT_TWO   2
+#define PERSIST_KEY_ALARM_TIMES       3
+#define PERSIST_KEY_ALARM_WAKEUP_IDS  4
+#define PERSIST_KEY_ALARM_IS_TIMERS   5
+#define PERSIST_KEY_ALARM_NAMES       8
 
 // next key: 15
 
-// We write the alarm count twice - once before doing any work, and once after.
-// If they disagree we assume the lower number is correct.
-#define PERSIST_KEY_ALARM_COUNT_ONE 1
-#define PERSIST_KEY_ALARM_COUNT_TWO 2
-#define PERSIST_KEY_ALARM_TIMES 3
-#define PERSIST_KEY_ALARM_WAKEUP_IDS 4
-#define PERSIST_KEY_ALARM_IS_TIMERS 5
-#define PERSIST_KEY_ALARM_NAMES 8
-
-// Store whether we have successfully requested location consent.
-#define PERSIST_KEY_LOCATION_ENABLED 6
-
-// Store whether the user has accepted the consents
-#define PERSIST_KEY_CONSENTS_COMPLETED 12
-
-// Contains the version we were running the last time we were launched
-#define PERSIST_KEY_VERSION 7
-
-// Persist keys for our settings
-#define PERSIST_KEY_QUICK_LAUNCH_BEHAVIOUR 9
-#define PERSIST_KEY_ALARM_VIBE_PATTERN 10
-#define PERSIST_KEY_TIMER_VIBE_PATTERN 11
-#define PERSIST_KEY_CONFIRM_TRANSCRIPTS 13
-
-#define PERSIST_KEY_AI_ENABLED 14
-
-#endif //APP_PERSIST_KEYS_H
+#endif

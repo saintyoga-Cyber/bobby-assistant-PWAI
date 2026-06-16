@@ -13,6 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#pragma once
 
-void release_notes_maybe_push();
+#ifndef VOICE_WINDOW_H
+#define VOICE_WINDOW_H
+
+// Push the primary voice-input window.  Starts dictation immediately;
+// matches offline commands on-watch or saves unrecognised speech as a
+// Rebble timeline note via the companion app.
+void voice_window_push(void);
+
+#endif

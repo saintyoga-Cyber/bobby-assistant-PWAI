@@ -21,7 +21,6 @@
 #include "../util/result_window.h"
 #include "../util/memory/malloc.h"
 #include "../util/memory/sdk.h"
-#include "../settings/settings.h"
 #include "../vibes/sad_vibe_score.h"
 
 #include <pebble-events/pebble-events.h>
@@ -58,7 +57,6 @@ static void prv_tick_callback(struct tm *tick_time, TimeUnits units_changed, voi
 static void prv_click_config_provider(void *context);
 static void prv_handle_snooze(ClickRecognizerRef recognizer, void *context);
 static void prv_handle_dismiss(ClickRecognizerRef recognizer, void *context);
-static uint32_t prv_resource_id_for_setting(VibePatternSetting setting);
 static SadVibeScore *prv_load_vibe_score(bool is_timer);
 
 void alarm_window_push(time_t alarm_time, bool is_timer, char *name) {
@@ -222,16 +220,16 @@ static void prv_handle_snooze(ClickRecognizerRef recognizer, void *context) {
   AlarmWindowData* data = window_get_user_data(window);
   int result;
   if (data->is_timer) {
-    result = alarm_manager_add_alarm(time(NULL) + 60, true, data->name, false);
+    result = alarm_manager_add_alarm(time(NULL) + 60, true, data->name);
   } else {
-    result = alarm_manager_add_alarm(time(NULL) + 600, false, data->name, false);
+    result = alarm_manager_add_alarm(time(NULL) + 600, false, data->name);
   }
   if (result == S_SUCCESS) {
-    const char* text = data->is_timer ? "Snoozed for 1 minute" : "Snoozed for 10 minutes";
-    result_window_push("Snoozed", text, bgdraw_command_image_create_with_resource(RESOURCE_ID_SLEEPING_PONY), BRANDED_BACKGROUND_COLOUR);
+    const char *text = data->is_timer ? "Snoozed for 1 minute" : "Snoozed for 10 minutes";
+    result_window_push("Snoozed", text);
   } else {
-    const char* text = data->is_timer ? "Failed to snooze. Timer dismissed." : "Failed to snooze. Alarm dismissed.";
-    result_window_push("Failed", text, bgdraw_command_image_create_with_resource(RESOURCE_ID_FAILED_PONY), COLOR_FALLBACK(GColorRed, GColorWhite));
+    const char *text = data->is_timer ? "Failed to snooze. Timer dismissed." : "Failed to snooze. Alarm dismissed.";
+    result_window_push("Failed", text);
   }
   window_stack_remove(window, false);
 }
@@ -240,29 +238,7 @@ static void prv_handle_dismiss(ClickRecognizerRef recognizer, void *context) {
   window_stack_pop(true);
 }
 
-static uint32_t prv_resource_id_for_setting(VibePatternSetting setting) {
-  switch (setting) {
-    case VibePatternSettingReveille:
-      return RESOURCE_ID_VIBE_REVEILLE;
-    case VibePatternSettingJackhammer:
-      return RESOURCE_ID_VIBE_JACKHAMMER;
-    case VibePatternSettingMario:
-      return RESOURCE_ID_VIBE_MARIO;
-    case VibePatternSettingStandard:
-      return RESOURCE_ID_VIBE_STANDARD;
-    case VibePatternSettingNudgeNudge:
-      return RESOURCE_ID_VIBE_NUDGE_NUDGE;
-  }
-  return RESOURCE_ID_VIBE_STANDARD;
-}
-
 static SadVibeScore *prv_load_vibe_score(bool is_timer) {
-  VibePatternSetting vibe_setting;
-  if (is_timer) {
-    vibe_setting = settings_get_timer_vibe_pattern();
-  } else {
-    vibe_setting = settings_get_alarm_vibe_pattern();
-  }
-  uint32_t resource_id = prv_resource_id_for_setting(vibe_setting);
+  uint32_t resource_id = is_timer ? RESOURCE_ID_VIBE_JACKHAMMER : RESOURCE_ID_VIBE_STANDARD;
   return sad_vibe_score_create_with_resource(resource_id);
 }

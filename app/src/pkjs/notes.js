@@ -14,23 +14,20 @@
  * limitations under the License.
  */
 
+var timeline = require('./actions/timeline');
 
-exports.QUERY_URL = 'wss://bobby-api.rebble.io/query';
-exports.QUOTA_URL = 'https://bobby-api.rebble.io/quota';
-exports.FEEDBACK_URL = 'https://bobby-api.rebble.io/feedback';
-exports.REPORT_URL = 'https://bobby-api.rebble.io/report';
+function saveNote(text, callback) {
+  var now = new Date();
+  var pin = {
+    id: 'pwai-note-' + now.getTime(),
+    time: now.toISOString(),
+    layout: {
+      type: 'genericPin',
+      title: text,
+      tinyIcon: 'system://images/NOTIFICATION_FLAG'
+    }
+  };
+  timeline.insertUserPin(pin, callback);
+}
 
-var override = require('./urls_override');
-
-if (override.QUERY_URL) {
-    exports.QUERY_URL = override.QUERY_URL;
-}
-if (override.QUOTA_URL) {
-    exports.QUOTA_URL = override.QUOTA_URL;
-}
-if (override.FEEDBACK_URL) {
-    exports.FEEDBACK_URL = override.FEEDBACK_URL;
-}
-if (override.REPORT_URL) {
-    exports.REPORT_URL = override.REPORT_URL;
-}
+module.exports = { saveNote: saveNote };

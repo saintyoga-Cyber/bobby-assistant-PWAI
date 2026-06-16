@@ -15,7 +15,6 @@
  */
 
 #include "manager.h"
-#include "../converse/conversation_manager.h"
 #include "../util/persist_keys.h"
 #include "../util/memory/malloc.h"
 #include "../util/logging.h"
@@ -58,7 +57,7 @@ void alarm_manager_init() {
   prv_load_alarms();
 }
 
-int alarm_manager_add_alarm(time_t when, bool is_timer, const char* name, bool conversational) {
+int alarm_manager_add_alarm(time_t when, bool is_timer, const char* name) {
   if (s_manager.pending_alarm_count >= MAX_ALARMS) {
     BOBBY_LOG(APP_LOG_LEVEL_WARNING, "Not scheduling alarm because MAX_ALARMS (%d) was already reached.", MAX_ALARMS);
     return E_OUT_OF_RESOURCES;
@@ -92,44 +91,6 @@ int alarm_manager_add_alarm(time_t when, bool is_timer, const char* name, bool c
     if (name_len > 0) {
       alarm->name = bmalloc(name_len + 1);
       strncpy(alarm->name, name, name_len + 1);
-    }
-  }
-
-  if (conversational && conversation_manager_get_current()) {
-    ConversationManager *conversation_manager = conversation_manager_get_current();
-    if (alarm->is_timer) {
-      // For timers, instead of the standard action item, we add a countdown widget.
-      ConversationWidget widget = {
-        .type = ConversationWidgetTypeTimer,
-        .locally_created = true,
-        .widget = {
-          .timer = {
-            .target_time = alarm->scheduled_time,
-          }
-        }
-      };
-      if (alarm->name) {
-        widget.widget.timer.name = bmalloc(name_len + 1);
-        strncpy(widget.widget.timer.name, alarm->name, name_len + 1);
-      }
-      conversation_manager_add_widget(conversation_manager, &widget);
-    } else {
-      ConversationAction action = {
-        .type = ConversationActionTypeSetAlarm,
-        .action = {
-          .set_alarm = {
-            .time = alarm->scheduled_time,
-            .is_timer = alarm->is_timer,
-            .deleted = false,
-            .name = NULL,
-          }
-        }
-      };
-      if (name) {
-        action.action.set_alarm.name = bmalloc(name_len + 1);
-        strncpy(action.action.set_alarm.name, name, name_len + 1);
-      }
-      conversation_manager_add_action(conversation_manager, &action);
     }
   }
 
@@ -299,29 +260,6 @@ static void prv_remove_alarm(int to_remove) {
   Alarm* alarm = &s_manager.pending_alarms[to_remove];
   wakeup_cancel(alarm->wakeup_id);
 
-  // We don't want to add an entry for deleting something that is in the present or past.
-  // Practically, this prevents us from adding entries when an alarm is dismissed during an active conversation.
-  if (conversation_manager_get_current() && alarm->scheduled_time > time(NULL)) {
-    ConversationManager *conversation_manager = conversation_manager_get_current();
-    ConversationAction action = {
-      .type = ConversationActionTypeSetAlarm,
-      .action = {
-        .set_alarm = {
-          .time = alarm->scheduled_time,
-          .is_timer = alarm->is_timer,
-          .deleted = true,
-          .name = NULL,
-        }
-      }
-    };
-    if (alarm->name) {
-      size_t name_len = strlen(alarm->name);
-      action.action.set_alarm.name = bmalloc(name_len + 1);
-      strncpy(action.action.set_alarm.name, alarm->name, name_len + 1);
-    }
-    conversation_manager_add_action(conversation_manager, &action);
-  }
-
   if (alarm->name) {
     free(alarm->name);
   }
@@ -402,7 +340,7 @@ static void prv_handle_set_alarm_request(DictionaryIterator *iterator, void *con
   if (tuple != NULL && strlen(tuple->value->cstring) > 0) {
     name = tuple->value->cstring;
   }
-  StatusCode result = alarm_manager_add_alarm(alarm_time, is_timer, name, true);
+  StatusCode result = alarm_manager_add_alarm(alarm_time, is_timer, name);
   prv_send_alarm_response(result);
   if (result == S_SUCCESS) {
     BOBBY_LOG(APP_LOG_LEVEL_INFO, "Set alarm for %d (is timer: %d)", alarm_time, is_timer);

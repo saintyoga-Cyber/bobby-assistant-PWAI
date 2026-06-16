@@ -23,8 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Deferred reminder send — avoids calling app_message_outbox_begin from within
-// the conversation handler chain which can corrupt AppMessage outbox state.
+// Deferred reminder send — schedules the AppMessage via a timer so it fires
+// after the dictation callback unwinds (avoids outbox state issues).
 typedef struct {
   time_t when;
   char text[32];
@@ -527,7 +527,7 @@ static bool prv_contains_token(const TokenList *tl, int from, const char *word) 
 // No wakeup API, no new windows, no alarm manager involvement.
 // ---------------------------------------------------------------------------
 
-static bool prv_match_reminder(ConversationManager *manager,
+static bool prv_match_reminder(char *result_buf, size_t result_size,
                                const TokenList *tl, int j) {
   if (j < tl->count &&
       (prv_eq(tl->tokens[j], "to") || prv_eq(tl->tokens[j], "that") ||
@@ -590,9 +590,7 @@ static bool prv_match_reminder(ConversationManager *manager,
 
   char timestr[16];
   prv_format_clock(when, timestr, sizeof(timestr));
-  char msg[80];
-  snprintf(msg, sizeof(msg), "Reminder for %s: %s.", timestr, text_buf);
-  conversation_manager_add_response(manager, msg);
+  snprintf(result_buf, result_size, "Reminder for %s: %s.", timestr, text_buf);
   BOBBY_LOG(APP_LOG_LEVEL_INFO, "Queued deferred reminder to phone at %d", (int)when);
   return true;
 }
@@ -601,7 +599,7 @@ static bool prv_match_reminder(ConversationManager *manager,
 // Main entry point
 // ---------------------------------------------------------------------------
 
-bool offline_commands_try(ConversationManager *manager, const char *input) {
+bool offline_commands_try(const char *input, char *result_buf, size_t result_size) {
   TokenList tl;
   if (!prv_tokenize(input, &tl)) {
     return false;
@@ -646,7 +644,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
                  count == 1 ? (is_timer ? "timer" : "alarm")
                              : (is_timer ? "timers" : "alarms"));
       }
-      conversation_manager_add_response(manager, msg);
+      snprintf(result_buf, result_size, "%s", msg);
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline cancel-all.");
       return true;
     }
@@ -661,12 +659,12 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
       return false;
     }
     if (alarm_manager_cancel_first(is_timer)) {
-      conversation_manager_add_response(manager,
-          is_timer ? "Timer cancelled." : "Alarm cancelled.");
+      snprintf(result_buf, result_size, "%s",
+               is_timer ? "Timer cancelled." : "Alarm cancelled.");
     } else {
-      conversation_manager_add_response(manager,
-          is_timer ? "You have no timer to cancel."
-                   : "You have no alarm to cancel.");
+      snprintf(result_buf, result_size, "%s",
+               is_timer ? "You have no timer to cancel."
+                        : "You have no alarm to cancel.");
     }
     BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline cancel command.");
     return true;
@@ -687,7 +685,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
            prv_eq(tl.tokens[j], "about"))) {
         j++;
       }
-      return prv_match_reminder(manager, &tl, j);
+      return prv_match_reminder(result_buf, result_size, &tl, j);
     }
     if (j >= tl.count) {
       return false;
@@ -746,16 +744,14 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         return false;
       }
       time_t when = time(NULL) + seconds;
-      int result = alarm_manager_add_alarm(when, true, name, false);
+      int result = alarm_manager_add_alarm(when, true, name);
       if (result != 0) {
-        conversation_manager_add_response(manager, "Sorry, I couldn't set that timer.");
+        snprintf(result_buf, result_size, "%s", "Sorry, I couldn't set that timer.");
         return true;
       }
       char dur[48];
       prv_format_duration(seconds, dur, sizeof(dur));
-      char msg[80];
-      snprintf(msg, sizeof(msg), "Timer set for %s.", dur);
-      conversation_manager_add_response(manager, msg);
+      snprintf(result_buf, result_size, "Timer set for %s.", dur);
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline timer for %d seconds.", seconds);
       return true;
     } else {
@@ -769,16 +765,14 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         return false;
       }
       time_t when = prv_next_occurrence(&ct);
-      int result = alarm_manager_add_alarm(when, false, name, false);
+      int result = alarm_manager_add_alarm(when, false, name);
       if (result != 0) {
-        conversation_manager_add_response(manager, "Sorry, I couldn't set that alarm.");
+        snprintf(result_buf, result_size, "%s", "Sorry, I couldn't set that alarm.");
         return true;
       }
       char timestr[16];
       prv_format_clock(when, timestr, sizeof(timestr));
-      char msg[64];
-      snprintf(msg, sizeof(msg), "Alarm set for %s.", timestr);
-      conversation_manager_add_response(manager, msg);
+      snprintf(result_buf, result_size, "Alarm set for %s.", timestr);
       BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline alarm for %d.", (int)when);
       return true;
     }
@@ -789,7 +783,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
     int j = i + 1;
     if (j >= tl.count || !prv_eq(tl.tokens[j], "me")) return false;
     j++;
-    return prv_match_reminder(manager, &tl, j);
+    return prv_match_reminder(result_buf, result_size, &tl, j);
   }
 
   // --- B2: List / query timers & alarms ------------------------------------
@@ -855,7 +849,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
             }
           }
         }
-        conversation_manager_add_response(manager, msg);
+        snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline list command.");
         return true;
       }
@@ -880,7 +874,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         } else {
           snprintf(msg, sizeof(msg), "Battery is at %d%%.", state.charge_percent);
         }
-        conversation_manager_add_response(manager, msg);
+        snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline battery query.");
         return true;
       }
@@ -898,7 +892,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         }
         char msg[80];
         snprintf(msg, sizeof(msg), "Today is %s.", datestr);
-        conversation_manager_add_response(manager, msg);
+        snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline date query.");
         return true;
       }
@@ -918,7 +912,7 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
         }
         char msg[48];
         snprintf(msg, sizeof(msg), "It's %s.", timestr);
-        conversation_manager_add_response(manager, msg);
+        snprintf(result_buf, result_size, "%s", msg);
         BOBBY_LOG(APP_LOG_LEVEL_INFO, "Handled offline time query.");
         return true;
       }
