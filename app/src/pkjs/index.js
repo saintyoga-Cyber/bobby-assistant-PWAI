@@ -16,6 +16,8 @@
 
 var reminders = require('./reminders');
 var notes = require('./notes');
+var weather = require('./weather');
+var timezone = require('./timezone');
 
 Pebble.addEventListener('ready', function() {
   console.log('PWAI ready');
@@ -26,6 +28,16 @@ Pebble.addEventListener('appmessage', function(e) {
 
   // Reminder commands (set / list / delete)
   if (reminders.handleReminderMessage(data)) {
+    return;
+  }
+
+  // Weather forecast
+  if (weather.handleWeatherRequest(data)) {
+    return;
+  }
+
+  // Timezone query
+  if (timezone.handleTzQuery(data)) {
     return;
   }
 

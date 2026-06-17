@@ -36,6 +36,8 @@ typedef struct {
   EventHandle app_message_handle;
   bool waiting_for_phone;
   bool dictation_pending;
+  bool waiting_for_weather;
+  bool waiting_for_tz;
 } VoiceWindow;
 
 static void prv_start_dictation(VoiceWindow *vw);
@@ -148,6 +150,46 @@ static void prv_dictation_callback(DictationSession *session,
 
   OfflineCommandType oc_type;
   if (offline_commands_try(transcription, result, sizeof(result), &oc_type)) {
+    // Weather and timezone require a phone round-trip; result holds the query.
+    if (oc_type == OC_TYPE_WEATHER) {
+      DictionaryIterator *iter;
+      if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+        result_window_push("PWAI", "Weather unavailable.", 0);
+        window_stack_remove(vw->window, false);
+        return;
+      }
+      // result[0] is '0' (today) or '1' (tomorrow)
+      int8_t day_offset = (result[0] == '1') ? 1 : 0;
+      dict_write_int(iter, MESSAGE_KEY_WEATHER_REQUEST, &day_offset, sizeof(int8_t), true);
+      if (app_message_outbox_send() != APP_MSG_OK) {
+        result_window_push("PWAI", "Weather unavailable.", 0);
+        window_stack_remove(vw->window, false);
+        return;
+      }
+      vw->waiting_for_phone = true;
+      vw->waiting_for_weather = true;
+      prv_set_status(vw, "Fetching weather\xe2\x80\xa6");
+      return;
+    }
+    if (oc_type == OC_TYPE_TIMEZONE) {
+      DictionaryIterator *iter;
+      if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+        result_window_push("PWAI", "Couldn't look up time.", 0);
+        window_stack_remove(vw->window, false);
+        return;
+      }
+      dict_write_cstring(iter, MESSAGE_KEY_TZ_QUERY, result);
+      if (app_message_outbox_send() != APP_MSG_OK) {
+        result_window_push("PWAI", "Couldn't look up time.", 0);
+        window_stack_remove(vw->window, false);
+        return;
+      }
+      vw->waiting_for_phone = true;
+      vw->waiting_for_tz = true;
+      prv_set_status(vw, "Looking up time\xe2\x80\xa6");
+      return;
+    }
+    // Pure offline result.
     uint32_t icon = 0;
     if (oc_type == OC_TYPE_TIMER || oc_type == OC_TYPE_ALARM) {
       icon = RESOURCE_ID_ICON_TIMER;
@@ -174,7 +216,7 @@ static void prv_dictation_callback(DictationSession *session,
     return;
   }
   vw->waiting_for_phone = true;
-  prv_set_status(vw, "Saving…");
+  prv_set_status(vw, "Saving\xe2\x80\xa6");
 }
 
 static void prv_app_message_received(DictionaryIterator *iter, void *context) {
@@ -182,7 +224,28 @@ static void prv_app_message_received(DictionaryIterator *iter, void *context) {
   if (!vw->waiting_for_phone) {
     return;
   }
-  Tuple *t = dict_find(iter, MESSAGE_KEY_NOTE_SAVED);
+
+  Tuple *t;
+
+  t = dict_find(iter, MESSAGE_KEY_WEATHER_RESPONSE);
+  if (t && vw->waiting_for_weather) {
+    vw->waiting_for_phone = false;
+    vw->waiting_for_weather = false;
+    result_window_push("PWAI", t->value->cstring, 0);
+    window_stack_remove(vw->window, false);
+    return;
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_TZ_RESPONSE);
+  if (t && vw->waiting_for_tz) {
+    vw->waiting_for_phone = false;
+    vw->waiting_for_tz = false;
+    result_window_push("PWAI", t->value->cstring, 0);
+    window_stack_remove(vw->window, false);
+    return;
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_NOTE_SAVED);
   if (t == NULL) {
     return;
   }

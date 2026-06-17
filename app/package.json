@@ -14,7 +14,7 @@
     "uuid": "1d272bb4-cf00-4e3e-a7f3-7394309e0341",
     "sdkVersion": "3",
     "enableMultiJS": true,
-    "capabilities": [],
+    "capabilities": ["location"],
     "targetPlatforms": [
       "basalt",
       "chalk",
@@ -44,7 +44,11 @@
       "REMINDER_TEXT",
       "REMINDER_ID",
       "REMINDER_TIME",
-      "REMINDER_DELETE"
+      "REMINDER_DELETE",
+      "WEATHER_REQUEST",
+      "WEATHER_RESPONSE",
+      "TZ_QUERY",
+      "TZ_RESPONSE"
     ],
     "resources": {
       "media": [

@@ -21,11 +21,14 @@
 #include <stddef.h>
 
 typedef enum {
-  OC_NONE     = 0,
+  OC_NONE             = 0,
   OC_TYPE_TIMER,
   OC_TYPE_ALARM,
   OC_TYPE_REMINDER,
   OC_TYPE_INFO,
+  OC_TYPE_UNIT_CONVERT,
+  OC_TYPE_WEATHER,
+  OC_TYPE_TIMEZONE,
 } OfflineCommandType;
 
 // Attempts to handle a transcribed prompt entirely on the watch (timers,
