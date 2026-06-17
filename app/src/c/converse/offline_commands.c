@@ -56,6 +56,9 @@ static bool prv_tokenize(const char *input, TokenList *tl) {
     }
     if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ':' || c == '\'' || c == ' ') {
       tl->buffer[w++] = c;
+    } else if (c == '.' && i + 1 < len && input[i + 1] >= '0' && input[i + 1] <= '9' &&
+               w > 0 && tl->buffer[w - 1] >= '0' && tl->buffer[w - 1] <= '9') {
+      tl->buffer[w++] = c;  // keep decimal point inside numeric literals like "1.5"
     } else {
       tl->buffer[w++] = ' ';
     }
@@ -587,6 +590,280 @@ static bool prv_match_reminder(ConversationManager *manager,
 }
 
 // ---------------------------------------------------------------------------
+// Unit Converter (offline)
+// ---------------------------------------------------------------------------
+
+#define UC_MASS  0
+#define UC_DIST  1
+#define UC_VOL   2
+#define UC_TEMP  3
+#define UC_SPEED 4
+
+typedef struct {
+  const char *tok;
+  int         cat;
+  double      to_base;  // multiply value by this → base unit
+                        // UC_TEMP: 1.0=Celsius(base), 0.0=Fahrenheit, -1.0=Kelvin
+  const char *disp;
+} UCUnit;
+
+static const UCUnit s_uc_units[] = {
+  // Mass (base: grams)
+  {"mg", UC_MASS, 0.001, "mg"},
+  {"milligram", UC_MASS, 0.001, "mg"}, {"milligrams", UC_MASS, 0.001, "mg"},
+  {"g", UC_MASS, 1.0, "g"},
+  {"gram", UC_MASS, 1.0, "g"}, {"grams", UC_MASS, 1.0, "g"},
+  {"kg", UC_MASS, 1000.0, "kg"},
+  {"kilogram", UC_MASS, 1000.0, "kg"}, {"kilograms", UC_MASS, 1000.0, "kg"},
+  {"oz", UC_MASS, 28.3495, "oz"},
+  {"ounce", UC_MASS, 28.3495, "oz"}, {"ounces", UC_MASS, 28.3495, "oz"},
+  {"lb", UC_MASS, 453.592, "lb"}, {"lbs", UC_MASS, 453.592, "lb"},
+  {"pound", UC_MASS, 453.592, "lb"}, {"pounds", UC_MASS, 453.592, "lb"},
+  // Distance (base: meters)
+  {"mm", UC_DIST, 0.001, "mm"},
+  {"millimeter", UC_DIST, 0.001, "mm"}, {"millimeters", UC_DIST, 0.001, "mm"},
+  {"cm", UC_DIST, 0.01, "cm"},
+  {"centimeter", UC_DIST, 0.01, "cm"}, {"centimeters", UC_DIST, 0.01, "cm"},
+  {"m", UC_DIST, 1.0, "m"},
+  {"meter", UC_DIST, 1.0, "m"}, {"meters", UC_DIST, 1.0, "m"},
+  {"km", UC_DIST, 1000.0, "km"},
+  {"kilometer", UC_DIST, 1000.0, "km"}, {"kilometers", UC_DIST, 1000.0, "km"},
+  {"inch", UC_DIST, 0.0254, "in"}, {"inches", UC_DIST, 0.0254, "in"},
+  {"ft", UC_DIST, 0.3048, "ft"},
+  {"foot", UC_DIST, 0.3048, "ft"}, {"feet", UC_DIST, 0.3048, "ft"},
+  {"yd", UC_DIST, 0.9144, "yd"},
+  {"yard", UC_DIST, 0.9144, "yd"}, {"yards", UC_DIST, 0.9144, "yd"},
+  {"mile", UC_DIST, 1609.34, "mi"}, {"miles", UC_DIST, 1609.34, "mi"},
+  // Volume (base: milliliters)
+  {"ml", UC_VOL, 1.0, "ml"},
+  {"milliliter", UC_VOL, 1.0, "ml"}, {"milliliters", UC_VOL, 1.0, "ml"},
+  {"l", UC_VOL, 1000.0, "L"},
+  {"liter", UC_VOL, 1000.0, "L"}, {"liters", UC_VOL, 1000.0, "L"},
+  {"tsp", UC_VOL, 4.92892, "tsp"},
+  {"teaspoon", UC_VOL, 4.92892, "tsp"}, {"teaspoons", UC_VOL, 4.92892, "tsp"},
+  {"tbsp", UC_VOL, 14.7868, "tbsp"},
+  {"tablespoon", UC_VOL, 14.7868, "tbsp"}, {"tablespoons", UC_VOL, 14.7868, "tbsp"},
+  {"fluid", UC_VOL, 29.5735, "fl oz"},  // "fluid ounce(s)"
+  {"cup", UC_VOL, 236.588, "cup"}, {"cups", UC_VOL, 236.588, "cups"},
+  {"pint", UC_VOL, 473.176, "pt"}, {"pints", UC_VOL, 473.176, "pt"},
+  {"quart", UC_VOL, 946.353, "qt"}, {"quarts", UC_VOL, 946.353, "qt"},
+  {"gallon", UC_VOL, 3785.41, "gal"}, {"gallons", UC_VOL, 3785.41, "gal"},
+  // Temperature (special sentinel: 1.0=C, 0.0=F, -1.0=K)
+  {"celsius", UC_TEMP, 1.0, "\xc2\xb0""C"}, {"c", UC_TEMP, 1.0, "\xc2\xb0""C"},
+  {"fahrenheit", UC_TEMP, 0.0, "\xc2\xb0""F"}, {"f", UC_TEMP, 0.0, "\xc2\xb0""F"},
+  {"kelvin", UC_TEMP, -1.0, "K"}, {"k", UC_TEMP, -1.0, "K"},
+  // Speed (base: m/s)
+  {"mph", UC_SPEED, 0.44704, "mph"},
+  {"kph", UC_SPEED, 0.27778, "km/h"}, {"kmh", UC_SPEED, 0.27778, "km/h"},
+  {"knot", UC_SPEED, 0.514444, "kn"}, {"knots", UC_SPEED, 0.514444, "kn"},
+};
+
+// Format a double to up to 4 decimal places, no trailing zeros.
+// Uses only integer snprintf (safe on all Pebble platforms).
+static void prv_format_float_uc(double v, char *buf, size_t size) {
+  bool neg = (v < 0.0);
+  if (neg) v = -v;
+  int int_part = (int)v;
+  int frac4 = (int)((v - (double)int_part) * 10000.0 + 0.5);
+  if (frac4 >= 10000) { int_part++; frac4 = 0; }
+  char tmp[48];
+  if (neg) {
+    snprintf(tmp, sizeof(tmp), "-%d.%04d", int_part, frac4);
+  } else {
+    snprintf(tmp, sizeof(tmp), "%d.%04d", int_part, frac4);
+  }
+  // Trim trailing zeros after decimal point
+  size_t len = strlen(tmp);
+  while (len > 0 && tmp[len - 1] == '0') { tmp[--len] = '\0'; }
+  if (len > 0 && tmp[len - 1] == '.') { tmp[--len] = '\0'; }
+  strncpy(buf, tmp, size - 1);
+  buf[size - 1] = '\0';
+}
+
+// Parse a floating-point value: decimal token ("1.5"), integer, word number,
+// or compound fraction ("one and a half" → 1.5).
+static double prv_parse_float(const TokenList *tl, int *idx) {
+  if (*idx >= tl->count) return -1.0;
+  const char *t = tl->tokens[*idx];
+  // Decimal token (after tokenizer fix keeps '.' between digits)
+  if (strchr(t, '.')) {
+    bool valid = true;
+    int dots = 0;
+    for (const char *p = t; *p; p++) {
+      if (*p == '.') { if (++dots > 1) { valid = false; break; } }
+      else if (*p < '0' || *p > '9') { valid = false; break; }
+    }
+    if (valid && dots == 1 && t[0] != '.') {
+      double v = 0.0;
+      const char *p = t;
+      while (*p && *p != '.') { v = v * 10.0 + (*p++ - '0'); }
+      if (*p == '.') {
+        p++;
+        double frac = 0.1;
+        while (*p) { v += (*p++ - '0') * frac; frac *= 0.1; }
+      }
+      (*idx)++;
+      return v;
+    }
+  }
+  // Integer / word number
+  int save = *idx;
+  int n = prv_parse_number(tl, idx);
+  if (n < 0) return -1.0;
+  double val = (double)n;
+  // Optional "and a half" / "and a quarter" / "and half"
+  int j = *idx;
+  if (j + 2 < tl->count && prv_eq(tl->tokens[j], "and") && prv_eq(tl->tokens[j + 1], "a")) {
+    if (prv_eq(tl->tokens[j + 2], "half")) { val += 0.5; *idx = j + 3; }
+    else if (prv_eq(tl->tokens[j + 2], "quarter")) { val += 0.25; *idx = j + 3; }
+  } else if (j + 1 < tl->count && prv_eq(tl->tokens[j], "and") &&
+             prv_eq(tl->tokens[j + 1], "half")) {
+    val += 0.5; *idx = j + 2;
+  }
+  (void)save;
+  return val;
+}
+
+// Find unit entry index at tl->tokens[*idx]. Advances *idx past the unit
+// (2 tokens for "fluid ounce/ounces/oz"). Returns -1 if not found.
+static int prv_find_uc_unit(const TokenList *tl, int *idx) {
+  if (*idx >= tl->count) return -1;
+  // Skip "degrees"/"degree" prefix for temperature
+  int i = *idx;
+  if (prv_eq(tl->tokens[i], "degrees") || prv_eq(tl->tokens[i], "degree")) {
+    i++;
+    if (i >= tl->count) return -1;
+  }
+  // Special compound: "fluid ounce(s)"
+  if (prv_eq(tl->tokens[i], "fluid") && i + 1 < tl->count) {
+    const char *nxt = tl->tokens[i + 1];
+    if (prv_eq(nxt, "ounce") || prv_eq(nxt, "ounces") || prv_eq(nxt, "oz")) {
+      *idx = i + 2;
+      // Return index of "fluid" entry in s_uc_units
+      int n = (int)(sizeof(s_uc_units) / sizeof(s_uc_units[0]));
+      for (int k = 0; k < n; k++) {
+        if (prv_eq(s_uc_units[k].tok, "fluid")) return k;
+      }
+    }
+  }
+  int n = (int)(sizeof(s_uc_units) / sizeof(s_uc_units[0]));
+  for (int k = 0; k < n; k++) {
+    if (prv_eq(tl->tokens[i], s_uc_units[k].tok)) {
+      *idx = i + 1;
+      return k;
+    }
+  }
+  return -1;
+}
+
+static double prv_uc_convert(double val, const UCUnit *from, const UCUnit *to) {
+  if (from->cat == UC_TEMP) {
+    double c;
+    if (from->to_base == 0.0) c = (val - 32.0) * 5.0 / 9.0;      // F → C
+    else if (from->to_base < 0.0) c = val - 273.15;                // K → C
+    else c = val;                                                    // C → C
+    if (to->to_base == 0.0) return c * 9.0 / 5.0 + 32.0;          // C → F
+    else if (to->to_base < 0.0) return c + 273.15;                 // C → K
+    return c;
+  }
+  return val * from->to_base / to->to_base;
+}
+
+static bool prv_match_unit_convert(char *result_buf, size_t result_size,
+                                   const TokenList *tl, int i) {
+  int idx = i;
+  bool how_many = false;
+
+  if (idx < tl->count && prv_eq(tl->tokens[idx], "convert")) {
+    idx++;
+  } else if (idx < tl->count && prv_eq(tl->tokens[idx], "how") &&
+             idx + 1 < tl->count && prv_eq(tl->tokens[idx + 1], "many")) {
+    idx += 2;
+    how_many = true;
+  }
+
+  int ua = -1, ub = -1;
+  double val = 0.0;
+
+  if (how_many) {
+    // Pattern: "how many UNIT_B in VALUE UNIT_A"
+    ub = prv_find_uc_unit(tl, &idx);
+    if (ub < 0) return false;
+    // Skip "are"/"is" if present, then require "in"
+    if (idx < tl->count && (prv_eq(tl->tokens[idx], "are") || prv_eq(tl->tokens[idx], "is")))
+      idx++;
+    if (idx >= tl->count || !prv_eq(tl->tokens[idx], "in")) return false;
+    idx++;
+    val = prv_parse_float(tl, &idx);
+    if (val < 0.0) return false;
+    ua = prv_find_uc_unit(tl, &idx);
+    if (ua < 0) return false;
+  } else {
+    // Pattern: "convert VALUE UNIT_A to UNIT_B" or "VALUE UNIT_A to/in UNIT_B"
+    val = prv_parse_float(tl, &idx);
+    if (val < 0.0) return false;
+    ua = prv_find_uc_unit(tl, &idx);
+    if (ua < 0) return false;
+    if (idx >= tl->count) return false;
+    if (prv_eq(tl->tokens[idx], "to") || prv_eq(tl->tokens[idx], "into") ||
+        prv_eq(tl->tokens[idx], "in") || prv_eq(tl->tokens[idx], "as")) {
+      idx++;
+    } else {
+      return false;
+    }
+    ub = prv_find_uc_unit(tl, &idx);
+    if (ub < 0) return false;
+  }
+
+  if (s_uc_units[ua].cat != s_uc_units[ub].cat) return false;
+
+  double result = prv_uc_convert(val, &s_uc_units[ua], &s_uc_units[ub]);
+  char val_str[24], res_str[24];
+  prv_format_float_uc(val, val_str, sizeof(val_str));
+  prv_format_float_uc(result, res_str, sizeof(res_str));
+  snprintf(result_buf, result_size, "%s %s = %s %s.",
+           val_str, s_uc_units[ua].disp, res_str, s_uc_units[ub].disp);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Weather query — encodes day offset (0=today, 1=tomorrow) in result_buf;
+// voice_window reads this and sends a WEATHER_REQUEST AppMessage to the phone.
+// ---------------------------------------------------------------------------
+
+static bool prv_match_weather(char *result_buf, size_t result_size,
+                              const TokenList *tl, int i) {
+  int day = 0;
+  for (int k = i; k < tl->count; k++) {
+    if (prv_eq(tl->tokens[k], "tomorrow")) { day = 1; break; }
+  }
+  snprintf(result_buf, result_size, "%d", day);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Timezone query — extracts location string after "in" into result_buf;
+// voice_window sends this as a TZ_QUERY AppMessage to the phone.
+// ---------------------------------------------------------------------------
+
+static bool prv_match_timezone(char *result_buf, size_t result_size,
+                               const TokenList *tl, int i) {
+  int in_idx = -1;
+  for (int k = i; k < tl->count; k++) {
+    if (prv_eq(tl->tokens[k], "in")) { in_idx = k; break; }
+  }
+  if (in_idx < 0 || in_idx + 1 >= tl->count) return false;
+  int pos = 0;
+  for (int k = in_idx + 1; k < tl->count && pos < (int)result_size - 1; k++) {
+    if (k > in_idx + 1 && pos < (int)result_size - 2) result_buf[pos++] = ' ';
+    const char *tok = tl->tokens[k];
+    while (*tok && pos < (int)result_size - 1) result_buf[pos++] = *tok++;
+  }
+  result_buf[pos] = '\0';
+  return pos > 0;
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -783,6 +1060,50 @@ bool offline_commands_try(ConversationManager *manager, const char *input) {
     if (!prv_eq(tl.tokens[j], "me")) return false;
     j++;
     return prv_match_reminder(manager, &tl, j);
+  }
+
+  // --- Unit Converter (offline) -------------------------------------------
+  if (i < tl.count && prv_eq(tl.tokens[i], "convert")) {
+    if (prv_match_unit_convert(result_buf, result_size, &tl, i)) {
+      if (out_type) *out_type = OC_TYPE_UNIT_CONVERT;
+      return true;
+    }
+  }
+  // "how many UNIT in VALUE UNIT" — unit convert wins over B2 for "how many"
+  if (i < tl.count && prv_eq(tl.tokens[i], "how") && i + 1 < tl.count &&
+      prv_eq(tl.tokens[i + 1], "many")) {
+    if (prv_match_unit_convert(result_buf, result_size, &tl, i)) {
+      if (out_type) *out_type = OC_TYPE_UNIT_CONVERT;
+      return true;
+    }
+    // fall through to B2 for "how many timers/alarms"
+  }
+  // "VALUE UNIT to UNIT" / "VALUE UNIT in UNIT" direct form
+  {
+    int uc_i = i;
+    if (prv_match_unit_convert(result_buf, result_size, &tl, uc_i)) {
+      if (out_type) *out_type = OC_TYPE_UNIT_CONVERT;
+      return true;
+    }
+  }
+
+  // --- Timezone Query (must come before B4 which also catches "time") ------
+  if ((prv_contains_token(&tl, i, "time") || prv_contains_token(&tl, i, "clock")) &&
+      prv_contains_token(&tl, i, "in")) {
+    if (prv_match_timezone(result_buf, result_size, &tl, i)) {
+      if (out_type) *out_type = OC_TYPE_TIMEZONE;
+      return true;
+    }
+  }
+
+  // --- Weather Query -------------------------------------------------------
+  if (prv_contains_token(&tl, i, "weather") || prv_contains_token(&tl, i, "forecast") ||
+      prv_contains_token(&tl, i, "temperature") || prv_contains_token(&tl, i, "rain") ||
+      prv_contains_token(&tl, i, "sunny") || prv_contains_token(&tl, i, "raining")) {
+    if (prv_match_weather(result_buf, result_size, &tl, i)) {
+      if (out_type) *out_type = OC_TYPE_WEATHER;
+      return true;
+    }
   }
 
   // --- B2: List / query timers & alarms ------------------------------------

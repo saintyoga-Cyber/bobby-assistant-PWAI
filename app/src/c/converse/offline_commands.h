@@ -17,16 +17,27 @@
 #ifndef OFFLINE_COMMANDS_H
 #define OFFLINE_COMMANDS_H
 
-#include "conversation_manager.h"
+#include <stdbool.h>
+#include <stddef.h>
 
-// Attempts to handle a transcribed prompt entirely on the watch (set/cancel a
-// timer or alarm), with no round trip to the service. Returns true if the
-// input was a recognised quick command and has been handled (a confirmation
-// response has been added to the conversation); returns false if the caller
-// should fall back to sending the prompt to the service as usual.
-//
-// The grammar is deliberately strict: only utterances that are essentially
-// just the command match, so compound requests still reach the assistant.
-bool offline_commands_try(ConversationManager* manager, const char* input);
+typedef enum {
+  OC_NONE             = 0,
+  OC_TYPE_TIMER,
+  OC_TYPE_ALARM,
+  OC_TYPE_REMINDER,
+  OC_TYPE_INFO,
+  OC_TYPE_UNIT_CONVERT,
+  OC_TYPE_WEATHER,
+  OC_TYPE_TIMEZONE,
+} OfflineCommandType;
+
+// Attempts to handle a transcribed prompt entirely on the watch (timers,
+// alarms, reminders, time/date/battery queries), with no round trip to the
+// service.  Returns true and writes a human-readable response into result_buf
+// if the input was a recognised command; returns false if the caller should
+// fall through (e.g. save as a note).  *out_type is set to the matched command
+// category (or OC_NONE on no match); pass NULL to ignore.
+bool offline_commands_try(const char *input, char *result_buf, size_t result_size,
+                          OfflineCommandType *out_type);
 
 #endif
