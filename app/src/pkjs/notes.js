@@ -24,7 +24,7 @@ function saveNote(text, callback) {
     layout: {
       type: 'genericPin',
       title: text,
-      tinyIcon: 'system://images/NOTIFICATION_REMINDER'
+      tinyIcon: 'system://images/TIMELINE_NEWS'
     }
   };
   timeline.insertUserPin(pin, callback);
