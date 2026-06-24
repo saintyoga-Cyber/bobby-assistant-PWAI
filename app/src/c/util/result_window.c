@@ -25,6 +25,7 @@
 typedef struct {
   TextLayer *title_layer;
   TextLayer *text_layer;
+  Layer *card_layer;
   StatusBarLayer *status_bar;
   GBitmap *icon_bitmap;
   BitmapLayer *icon_layer;
@@ -34,6 +35,7 @@ typedef struct {
   AppTimer *timer;
 } ResultWindowData;
 
+static void prv_card_update(Layer *layer, GContext *ctx);
 static void prv_window_load(Window *window);
 static void prv_window_unload(Window *window);
 static void prv_window_appear(Window *window);
@@ -86,12 +88,21 @@ static void prv_window_load(Window *window) {
                                fonts->text_font_cap * 2 + 4);
   content_y = (int16_t)((bounds.size.h - block_h) / 2);
   if (content_y < 4) content_y = 4;
+  GRect card_rect = GRect((int16_t)(side - 12), (int16_t)(content_y - 10),
+                           (int16_t)(text_w + 24), (int16_t)(block_h + 20));
 #else
   data->status_bar = bstatus_bar_layer_create();
   bobby_status_bar_result_pane_config(data->status_bar);
   layer_add_child(root, status_bar_layer_get_layer(data->status_bar));
   content_y = STATUS_BAR_LAYER_HEIGHT + 8;
+  GRect card_rect = GRect(6, STATUS_BAR_LAYER_HEIGHT + 2,
+                           bounds.size.w - 12, bounds.size.h - STATUS_BAR_LAYER_HEIGHT - 8);
 #endif
+
+  // White card floated over the orange background.
+  data->card_layer = blayer_create(card_rect);
+  layer_set_update_proc(data->card_layer, prv_card_update);
+  layer_add_child(root, data->card_layer);
 
   if (data->icon_bitmap) {
     int16_t icon_x = (bounds.size.w - icon_w) / 2;
@@ -106,6 +117,7 @@ static void prv_window_load(Window *window) {
   data->title_layer = btext_layer_create(
       GRect(side, content_y, text_w, fonts->title_font_cap + 4));
   text_layer_set_background_color(data->title_layer, GColorClear);
+  text_layer_set_text_color(data->title_layer, GColorBlack);
   text_layer_set_font(data->title_layer, fonts->title_font);
   text_layer_set_text_alignment(data->title_layer, GTextAlignmentCenter);
   text_layer_set_text(data->title_layer, data->title_text);
@@ -115,10 +127,17 @@ static void prv_window_load(Window *window) {
   data->text_layer = btext_layer_create(
       GRect(side, text_y, text_w, bounds.size.h - text_y - side / 2));
   text_layer_set_background_color(data->text_layer, GColorClear);
+  text_layer_set_text_color(data->text_layer, GColorBlack);
   text_layer_set_font(data->text_layer, fonts->text_font);
   text_layer_set_text_alignment(data->text_layer, GTextAlignmentCenter);
   text_layer_set_text(data->text_layer, data->text_text);
   layer_add_child(root, text_layer_get_layer(data->text_layer));
+}
+
+static void prv_card_update(Layer *layer, GContext *ctx) {
+  GRect b = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, COLOR_FALLBACK(GColorWhite, GColorLightGray));
+  graphics_fill_round_rect(ctx, b, 8, GCornersAll);
 }
 
 static void prv_window_unload(Window *window) {
@@ -132,6 +151,7 @@ static void prv_window_unload(Window *window) {
   if (data->icon_bitmap) {
     gbitmap_destroy(data->icon_bitmap);
   }
+  layer_destroy(data->card_layer);
   text_layer_destroy(data->title_layer);
   text_layer_destroy(data->text_layer);
   if (data->status_bar) {

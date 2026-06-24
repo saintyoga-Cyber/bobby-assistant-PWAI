@@ -46,7 +46,7 @@ function fetchWeather(dayOffset, callback) {
         '?latitude=' + lat + '&longitude=' + lon +
         '&current=temperature_2m,weather_code' +
         '&daily=temperature_2m_max,temperature_2m_min,weather_code' +
-        '&temperature_unit=fahrenheit&forecast_days=2&timezone=auto';
+        '&temperature_unit=celsius&forecast_days=2&timezone=auto';
 
       var xhr = new XMLHttpRequest();
       xhr.onload = function() {
@@ -60,12 +60,12 @@ function fetchWeather(dayOffset, callback) {
           if (dayOffset === 0) {
             var temp = round1(data.current.temperature_2m);
             var cond = wmoDesc(data.current.weather_code);
-            text = temp + '°F, ' + cond + '.';
+            text = temp + '°C, ' + cond + '.';
           } else {
             var hi = Math.round(data.daily.temperature_2m_max[1]);
             var lo = Math.round(data.daily.temperature_2m_min[1]);
             var cond2 = wmoDesc(data.daily.weather_code[1]);
-            text = 'Tomorrow: ' + lo + '–' + hi + '°F, ' + cond2 + '.';
+            text = 'Tomorrow: ' + lo + '–' + hi + '°C, ' + cond2 + '.';
           }
           callback(text);
         } catch (e) {

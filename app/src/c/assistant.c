@@ -15,6 +15,7 @@
  */
 
 #include "converse/voice_window.h"
+#include "home_window.h"
 #include "alarms/manager.h"
 #include "util/fonts.h"
 #include "util/memory/pressure.h"
@@ -40,7 +41,11 @@ static void prv_deinit(void) {
 int main(void) {
   prv_init();
   if (!alarm_manager_maybe_alarm()) {
-    voice_window_push();
+    if (launch_reason() == APP_LAUNCH_USER) {
+      home_window_push();
+    } else {
+      voice_window_push();
+    }
   }
   app_event_loop();
   prv_deinit();
