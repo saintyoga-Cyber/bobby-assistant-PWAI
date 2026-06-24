@@ -137,7 +137,7 @@ static void prv_window_load(Window *window) {
 static void prv_card_update(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
   graphics_context_set_fill_color(ctx, COLOR_FALLBACK(GColorWhite, GColorLightGray));
-  graphics_fill_round_rect(ctx, b, 8, GCornersAll);
+  graphics_fill_rect(ctx, b, 8, GCornersAll);
 }
 
 static void prv_window_unload(Window *window) {
