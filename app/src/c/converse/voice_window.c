@@ -38,6 +38,9 @@ typedef struct {
   bool dictation_pending;
   bool waiting_for_weather;
   bool waiting_for_tz;
+  bool present_pending;
+  uint32_t pending_icon;
+  char pending_result[RESULT_BUF_SIZE];
 } VoiceWindow;
 
 static void prv_start_dictation(VoiceWindow *vw);
@@ -46,6 +49,10 @@ static void prv_dictation_callback(DictationSession *session,
                                    char *transcription, void *context);
 static void prv_app_message_received(DictionaryIterator *iter, void *context);
 static void prv_set_status(VoiceWindow *vw, const char *text);
+static void prv_present_result_deferred(VoiceWindow *vw, const char *text, uint32_t icon);
+static void prv_deferred_present(void *context);
+static void prv_close_deferred(VoiceWindow *vw);
+static void prv_deferred_close(void *context);
 static void prv_window_load(Window *window);
 static void prv_window_unload(Window *window);
 static void prv_window_appear(Window *window);
@@ -127,6 +134,46 @@ static void prv_set_status(VoiceWindow *vw, const char *text) {
   text_layer_set_text(vw->status_layer, text);
 }
 
+// Show a result window and tear down the voice window from a fresh event-loop
+// turn. This MUST be used instead of calling window_stack_remove() directly
+// from prv_dictation_callback: removing the voice window runs prv_window_unload
+// synchronously, which destroys the DictationSession. Destroying a session from
+// inside its own completion callback is a use-after-free in the firmware and
+// reboots the watch. Deferring via a 0-delay timer lets the callback unwind
+// first, so the session is destroyed safely.
+static void prv_present_result_deferred(VoiceWindow *vw, const char *text, uint32_t icon) {
+  if (vw->present_pending) {
+    return;
+  }
+  strncpy(vw->pending_result, text, RESULT_BUF_SIZE - 1);
+  vw->pending_result[RESULT_BUF_SIZE - 1] = '\0';
+  vw->pending_icon = icon;
+  vw->present_pending = true;
+  app_timer_register(10, prv_deferred_present, vw);
+}
+
+static void prv_deferred_present(void *context) {
+  VoiceWindow *vw = context;
+  result_window_push("PWAI", vw->pending_result, vw->pending_icon);
+  window_stack_remove(vw->window, false);
+}
+
+// Close the voice window from a fresh event-loop turn. Same rationale as
+// prv_present_result_deferred: never remove this window (and thus destroy the
+// dictation session) from inside the dictation callback.
+static void prv_close_deferred(VoiceWindow *vw) {
+  if (vw->present_pending) {
+    return;
+  }
+  vw->present_pending = true;
+  app_timer_register(10, prv_deferred_close, vw);
+}
+
+static void prv_deferred_close(void *context) {
+  VoiceWindow *vw = context;
+  window_stack_remove(vw->window, true);
+}
+
 static void prv_dictation_callback(DictationSession *session,
                                    DictationSessionStatus status,
                                    char *transcription, void *context) {
@@ -134,8 +181,10 @@ static void prv_dictation_callback(DictationSession *session,
 
   if (status != DictationSessionStatusSuccess) {
     if (status == DictationSessionStatusFailureTranscriptionRejected) {
-      // User backed out of the dictation UI — exit the app.
-      window_stack_pop(true);
+      // User backed out of the dictation UI — leave the voice window (returns
+      // to the home menu, or exits the app if launched via quick launch).
+      // Deferred so the session isn't destroyed inside its own callback.
+      prv_close_deferred(vw);
     } else {
       // Mic / network / no-speech error — offer retry via SELECT.
       prv_set_status(vw, "Tap to retry");
@@ -154,16 +203,14 @@ static void prv_dictation_callback(DictationSession *session,
     if (oc_type == OC_TYPE_WEATHER) {
       DictionaryIterator *iter;
       if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
-        result_window_push("PWAI", "Weather unavailable.", 0);
-        window_stack_remove(vw->window, false);
+        prv_present_result_deferred(vw, "Weather unavailable.", 0);
         return;
       }
       // result[0] is '0' (today) or '1' (tomorrow)
       int8_t day_offset = (result[0] == '1') ? 1 : 0;
       dict_write_int(iter, MESSAGE_KEY_WEATHER_REQUEST, &day_offset, sizeof(int8_t), true);
       if (app_message_outbox_send() != APP_MSG_OK) {
-        result_window_push("PWAI", "Weather unavailable.", 0);
-        window_stack_remove(vw->window, false);
+        prv_present_result_deferred(vw, "Weather unavailable.", 0);
         return;
       }
       vw->waiting_for_phone = true;
@@ -174,14 +221,12 @@ static void prv_dictation_callback(DictationSession *session,
     if (oc_type == OC_TYPE_TIMEZONE) {
       DictionaryIterator *iter;
       if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
-        result_window_push("PWAI", "Couldn't look up time.", 0);
-        window_stack_remove(vw->window, false);
+        prv_present_result_deferred(vw, "Couldn't look up time.", 0);
         return;
       }
       dict_write_cstring(iter, MESSAGE_KEY_TZ_QUERY, result);
       if (app_message_outbox_send() != APP_MSG_OK) {
-        result_window_push("PWAI", "Couldn't look up time.", 0);
-        window_stack_remove(vw->window, false);
+        prv_present_result_deferred(vw, "Couldn't look up time.", 0);
         return;
       }
       vw->waiting_for_phone = true;
@@ -197,22 +242,19 @@ static void prv_dictation_callback(DictationSession *session,
       icon = RESOURCE_ID_ICON_REMINDER;
     }
     vibe_haptic_feedback();
-    result_window_push("PWAI", result, icon);
-    window_stack_remove(vw->window, false);
+    prv_present_result_deferred(vw, result, icon);
     return;
   }
 
   // Not an offline command — send to phone as a note.
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
-    result_window_push("PWAI", "Couldn't save note", RESOURCE_ID_ICON_NOTE);
-    window_stack_remove(vw->window, false);
+    prv_present_result_deferred(vw, "Couldn't save note", RESOURCE_ID_ICON_NOTE);
     return;
   }
   dict_write_cstring(iter, MESSAGE_KEY_NOTE_TEXT, transcription);
   if (app_message_outbox_send() != APP_MSG_OK) {
-    result_window_push("PWAI", "Couldn't save note", RESOURCE_ID_ICON_NOTE);
-    window_stack_remove(vw->window, false);
+    prv_present_result_deferred(vw, "Couldn't save note", RESOURCE_ID_ICON_NOTE);
     return;
   }
   vw->waiting_for_phone = true;
@@ -261,7 +303,7 @@ static void prv_click_config_provider(void *context) {
 
 static void prv_select_clicked(ClickRecognizerRef recognizer, void *context) {
   VoiceWindow *vw = context;
-  if (!vw->waiting_for_phone) {
+  if (!vw->waiting_for_phone && !vw->present_pending) {
     prv_start_dictation(vw);
   }
 }
