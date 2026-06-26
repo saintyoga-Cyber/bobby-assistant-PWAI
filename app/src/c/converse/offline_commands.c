@@ -879,7 +879,9 @@ static bool prv_match_timezone(char *result_buf, size_t result_size,
 bool offline_commands_try(const char *input, char *result_buf, size_t result_size,
                           OfflineCommandType *out_type) {
   if (out_type) *out_type = OC_NONE;
-  TokenList tl;
+  // Static: 292-byte TokenList on the stack would combine with prv_save_alarms'
+  // static locals to overflow the call stack. Single-threaded, never re-entered.
+  static TokenList tl;
   if (!prv_tokenize(input, &tl)) {
     return false;
   }

@@ -145,8 +145,10 @@ static void prv_present_result_deferred(VoiceWindow *vw, const char *text, uint3
   if (vw->present_pending) {
     return;
   }
-  strncpy(vw->pending_result, text, RESULT_BUF_SIZE - 1);
-  vw->pending_result[RESULT_BUF_SIZE - 1] = '\0';
+  if (text != vw->pending_result) {
+    strncpy(vw->pending_result, text, RESULT_BUF_SIZE - 1);
+    vw->pending_result[RESULT_BUF_SIZE - 1] = '\0';
+  }
   vw->pending_icon = icon;
   vw->present_pending = true;
   app_timer_register(10, prv_deferred_present, vw);
@@ -194,20 +196,22 @@ static void prv_dictation_callback(DictationSession *session,
 
   BOBBY_LOG(APP_LOG_LEVEL_INFO, "Dictation: \"%s\"", transcription);
 
-  char result[RESULT_BUF_SIZE];
-  result[0] = '\0';
+  // Write directly into vw->pending_result — avoids a 160-byte local on the
+  // stack, which would overflow when combined with offline_commands_try's
+  // static TokenList and prv_save_alarms' static persist buffers.
+  vw->pending_result[0] = '\0';
 
   OfflineCommandType oc_type;
-  if (offline_commands_try(transcription, result, sizeof(result), &oc_type)) {
-    // Weather and timezone require a phone round-trip; result holds the query.
+  if (offline_commands_try(transcription, vw->pending_result, RESULT_BUF_SIZE, &oc_type)) {
+    // Weather and timezone require a phone round-trip; pending_result holds the query.
     if (oc_type == OC_TYPE_WEATHER) {
       DictionaryIterator *iter;
       if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
         prv_present_result_deferred(vw, "Weather unavailable.", 0);
         return;
       }
-      // result[0] is '0' (today) or '1' (tomorrow)
-      int8_t day_offset = (result[0] == '1') ? 1 : 0;
+      // pending_result[0] is '0' (today) or '1' (tomorrow)
+      int8_t day_offset = (vw->pending_result[0] == '1') ? 1 : 0;
       dict_write_int(iter, MESSAGE_KEY_WEATHER_REQUEST, &day_offset, sizeof(int8_t), true);
       if (app_message_outbox_send() != APP_MSG_OK) {
         prv_present_result_deferred(vw, "Weather unavailable.", 0);
@@ -224,7 +228,7 @@ static void prv_dictation_callback(DictationSession *session,
         prv_present_result_deferred(vw, "Couldn't look up time.", 0);
         return;
       }
-      dict_write_cstring(iter, MESSAGE_KEY_TZ_QUERY, result);
+      dict_write_cstring(iter, MESSAGE_KEY_TZ_QUERY, vw->pending_result);
       if (app_message_outbox_send() != APP_MSG_OK) {
         prv_present_result_deferred(vw, "Couldn't look up time.", 0);
         return;
@@ -234,7 +238,7 @@ static void prv_dictation_callback(DictationSession *session,
       prv_set_status(vw, "Looking up time\xe2\x80\xa6");
       return;
     }
-    // Pure offline result.
+    // Pure offline result — pending_result already has the display text.
     uint32_t icon = 0;
     if (oc_type == OC_TYPE_TIMER || oc_type == OC_TYPE_ALARM) {
       icon = RESOURCE_ID_ICON_TIMER;
@@ -242,7 +246,7 @@ static void prv_dictation_callback(DictationSession *session,
       icon = RESOURCE_ID_ICON_REMINDER;
     }
     vibe_haptic_feedback();
-    prv_present_result_deferred(vw, result, icon);
+    prv_present_result_deferred(vw, vw->pending_result, icon);
     return;
   }
 

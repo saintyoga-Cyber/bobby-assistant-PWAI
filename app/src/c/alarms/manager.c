@@ -229,10 +229,14 @@ static void prv_save_alarms() {
     wakeup_cancel_all();
     return;
   }
-  time_t times[MAX_ALARMS];
-  WakeupId wakeup_ids[MAX_ALARMS];
-  bool is_timers[MAX_ALARMS];
-  char names[MAX_ALARMS][ALARM_NAME_SIZE];
+  // Static: these 328 bytes would overflow the app stack when called from
+  // inside the dictation callback (which already has ~450 bytes of locals
+  // between prv_dictation_callback and offline_commands_try). Pebble is
+  // single-threaded so static is safe here.
+  static time_t times[MAX_ALARMS];
+  static WakeupId wakeup_ids[MAX_ALARMS];
+  static bool is_timers[MAX_ALARMS];
+  static char names[MAX_ALARMS][ALARM_NAME_SIZE];
   memset(names, 0, sizeof(names));
   for (int i = 0; i < s_manager.pending_alarm_count; ++i) {
     Alarm* alarm = &s_manager.pending_alarms[i];
